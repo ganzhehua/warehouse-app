@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#1677ff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="仓库管理">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="description" content="仓库设备录入、查询、看板管理系统">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+    <link rel="shortcut icon" href="icons/icon-192.png">
+    <title>仓库设备管理系统</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Tesseract.js OCR库 -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- SheetJS Excel导出库 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="app-header">
+        <h1>仓库设备管理系统</h1>
+    </header>
+
+    <!-- 底部导航 -->
+    <nav class="bottom-nav">
+        <button class="nav-btn active" data-page="home">
+            <span class="nav-icon">🏠</span>
+            <span class="nav-label">首页</span>
+        </button>
+        <button class="nav-btn" data-page="entry">
+            <span class="nav-icon">📝</span>
+            <span class="nav-label">录入</span>
+        </button>
+        <button class="nav-btn" data-page="search">
+            <span class="nav-icon">🔍</span>
+            <span class="nav-label">搜索</span>
+        </button>
+        <button class="nav-btn" data-page="dashboard">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">看板</span>
+        </button>
+        <button class="nav-btn" data-page="list">
+            <span class="nav-icon">📋</span>
+            <span class="nav-label">列表</span>
+        </button>
+    </nav>
+
+    <main class="app-main">
+        <!-- 首页 -->
+        <section id="page-home" class="page active">
+            <div class="home-stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">设备总数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-types">0</div>
+                    <div class="stat-label">类型数量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-qty">0</div>
+                    <div class="stat-label">总数量</div>
+                </div>
+            </div>
+
+            <div class="quick-actions">
+                <button class="action-btn" onclick="switchPage('entry')">
+                    <span class="action-icon">➕</span>
+                    <span>新增设备</span>
+                </button>
+                <button class="action-btn" onclick="switchPage('search')">
+                    <span class="action-icon">🔍</span>
+                    <span>SN搜索</span>
+                </button>
+                <button class="action-btn" onclick="switchPage('dashboard')">
+                    <span class="action-icon">📊</span>
+                    <span>数据看板</span>
+                </button>
+                <button class="action-btn" onclick="exportExcel()">
+                    <span class="action-icon">📤</span>
+                    <span>导出表格</span>
+                </button>
+            </div>
+
+            <div class="recent-section">
+                <h3>最近录入</h3>
+                <div id="recent-list" class="recent-list">
+                    <p class="empty-tip">暂无数据，快去录入吧~</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 录入页面 -->
+        <section id="page-entry" class="page">
+            <div class="page-header">
+                <h2>设备录入</h2>
+                <button class="btn-secondary" onclick="resetForm()">重置</button>
+            </div>
+
+            <form id="entry-form" class="entry-form">
+                <input type="hidden" id="edit-id" value="">
+
+                <div class="form-group">
+                    <label>厂家 <span class="required">*</span></label>
+                    <input type="text" id="manufacturer" placeholder="请输入厂家名称" required>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件类型 <span class="required">*</span></label>
+                    <select id="type" required>
+                        <option value="">请选择类型</option>
+                        <option value="设备">设备</option>
+                        <option value="备件">备件</option>
+                        <option value="工具">工具</option>
+                        <option value="耗材">耗材</option>
+                        <option value="其他">其他</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件名称 <span class="required">*</span></label>
+                    <input type="text" id="name" placeholder="请输入名称" required>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件型号</label>
+                    <input type="text" id="model" placeholder="请输入型号">
+                </div>
+
+                <div class="form-group">
+                    <label>设备序列号SN码 <span class="required">*</span></label>
+                    <div class="sn-input-group">
+                        <input type="text" id="sn" placeholder="请输入或拍照识别SN码" required>
+                        <button type="button" class="btn-ocr" onclick="captureAndOCR('sn')">📷 拍照识别</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件SN码图片</label>
+                    <div class="photo-upload" id="sn-photo-box">
+                        <input type="file" id="sn-photo" accept="image/*" capture="environment" class="photo-input" onchange="handlePhotoUpload(this, 'sn')">
+                        <div class="photo-placeholder" onclick="document.getElementById('sn-photo').click()">
+                            <span class="photo-icon">📷</span>
+                            <span>点击拍照/上传SN码图片</span>
+                        </div>
+                        <div class="photo-preview" id="sn-preview"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件正面图片</label>
+                    <div class="photo-upload" id="front-photo-box">
+                        <input type="file" id="front-photo" accept="image/*" capture="environment" class="photo-input" onchange="handlePhotoUpload(this, 'front')">
+                        <div class="photo-placeholder" onclick="document.getElementById('front-photo').click()">
+                            <span class="photo-icon">📷</span>
+                            <span>点击拍照/上传正面图片</span>
+                        </div>
+                        <div class="photo-preview" id="front-preview"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>数量 <span class="required">*</span></label>
+                    <div class="qty-group">
+                        <input type="number" id="quantity" placeholder="数量" min="0" step="1" required style="flex:1;">
+                        <select id="unit">
+                            <option value="件">件</option>
+                            <option value="套">套</option>
+                            <option value="个">个</option>
+                            <option value="箱">箱</option>
+                            <option value="台">台</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>设备/备件使用状态 <span class="required">*</span></label>
+                    <select id="status" required>
+                        <option value="">请选择状态</option>
+                        <option value="在库-未使用">在库-未使用</option>
+                        <option value="在库-已使用">在库-已使用</option>
+                        <option value="在库-待维修">在库-待维修</option>
+                        <option value="出库">出库</option>
+                        <option value="维修中">维修中</option>
+                        <option value="报废">报废</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>存放地点 <span class="required">*</span></label>
+                    <input type="text" id="location" placeholder="例如：A区-03货架-第2层" required>
+                </div>
+
+                <div class="form-group">
+                    <label>备注</label>
+                    <textarea id="remark" rows="3" placeholder="请输入备注信息"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>出库记录</label>
+                    <textarea id="outbound" rows="2" placeholder="出库时间、领用人、用途等（可留空）"></textarea>
+                </div>
+
+                <button type="submit" class="btn-primary btn-block">保存录入</button>
+            </form>
+        </section>
+
+        <!-- 搜索页面 -->
+        <section id="page-search" class="page">
+            <div class="page-header">
+                <h2>SN码搜索</h2>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="输入SN码进行搜索...">
+                <button class="btn-ocr" onclick="captureAndOCR('search')">📷 拍照</button>
+                <button class="btn-primary" onclick="doSearch()">搜索</button>
+            </div>
+
+            <div id="search-results" class="search-results">
+                <p class="empty-tip">输入SN码快速定位仓库设备</p>
+            </div>
+        </section>
+
+        <!-- 看板页面 -->
+        <section id="page-dashboard" class="page">
+            <div class="page-header">
+                <h2>数据看板</h2>
+                <button class="btn-secondary" onclick="exportExcel()">📤 导出</button>
+            </div>
+
+            <div class="dashboard-overview">
+                <div class="dash-card total">
+                    <div class="dash-value" id="dash-total">0</div>
+                    <div class="dash-label">设备种类</div>
+                </div>
+                <div class="dash-card qty">
+                    <div class="dash-value" id="dash-qty">0</div>
+                    <div class="dash-label">总数量</div>
+                </div>
+                <div class="dash-card in">
+                    <div class="dash-value" id="dash-in">0</div>
+                    <div class="dash-label">在库</div>
+                </div>
+                <div class="dash-card out">
+                    <div class="dash-value" id="dash-out">0</div>
+                    <div class="dash-label">出库</div>
+                </div>
+            </div>
+
+            <div class="dash-section">
+                <h3>按类型统计</h3>
+                <div id="type-stats" class="stat-list"></div>
+            </div>
+
+            <div class="dash-section">
+                <h3>按状态统计</h3>
+                <div id="status-stats" class="stat-list"></div>
+            </div>
+
+            <div class="dash-section">
+                <h3>按厂家统计</h3>
+                <div id="mfr-stats" class="stat-list"></div>
+            </div>
+
+            <div class="dash-section">
+                <h3>存放地点分布</h3>
+                <div id="location-stats" class="stat-list"></div>
+            </div>
+        </section>
+
+        <!-- 列表页面 -->
+        <section id="page-list" class="page">
+            <div class="page-header">
+                <h2>设备列表</h2>
+                <button class="btn-secondary" onclick="exportExcel()">📤 导出</button>
+            </div>
+
+            <div class="list-filter">
+                <input type="text" id="list-filter" placeholder="搜索名称/SN/型号/地点..." oninput="renderList()">
+                <select id="status-filter" onchange="renderList()">
+                    <option value="">全部状态</option>
+                    <option value="在库-未使用">在库-未使用</option>
+                    <option value="在库-已使用">在库-已使用</option>
+                    <option value="在库-待维修">在库-待维修</option>
+                    <option value="出库">出库</option>
+                    <option value="维修中">维修中</option>
+                    <option value="报废">报废</option>
+                </select>
+            </div>
+
+            <div id="device-list" class="device-list"></div>
+        </section>
+    </main>
+
+    <!-- OCR处理中遮罩 -->
+    <div id="ocr-mask" class="ocr-mask">
+        <div class="ocr-loading">
+            <div class="spinner"></div>
+            <p id="ocr-text">正在识别文字...</p>
+        </div>
+    </div>
+
+    <!-- 图片查看大图遮罩 -->
+    <div id="img-modal" class="img-modal" onclick="closeImgModal()">
+        <img id="img-modal-content" src="" alt="大图预览">
+    </div>
+
+    <!-- Toast提示 -->
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
