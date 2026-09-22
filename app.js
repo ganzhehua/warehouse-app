@@ -104,6 +104,7 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
 function resetForm() {
     document.getElementById('entry-form').reset();
     document.getElementById('edit-id').value = '';
+    document.getElementById('location').value = '南街局值守班';
     photoData = { sn: '', front: '' };
     document.getElementById('sn-preview').innerHTML = '';
     document.getElementById('sn-preview').classList.remove('has-photo');
@@ -137,14 +138,9 @@ function showPhotoPreview(type, imgSrc) {
     placeholder.style.display = 'none';
     preview.classList.add('has-photo');
 
-    let ocrBtn = type === 'sn'
-        ? `<button class="photo-ocr-btn" onclick="ocrFromImage('${imgSrc.slice(0, 50)}...')">🔍 识别SN</button>`
-        : '';
-
     preview.innerHTML = `
         <img src="${imgSrc}" onclick="showImgModal('${imgSrc}')">
         <button class="photo-remove" onclick="removePhoto('${type}')">×</button>
-        ${ocrBtn}
     `;
 }
 
@@ -179,21 +175,14 @@ function compressImage(dataUrl, maxWidth, quality) {
     });
 }
 
-// ===== OCR识别 =====
-let ocrWorker = null;
+// ===== 二维码识别 =====
+let codeReader = null;
 
-async function getOCRWorker() {
-    if (!ocrWorker) {
-        showOCRMask('正在加载OCR引擎...');
-        ocrWorker = await Tesseract.createWorker('eng+chi_sim', 1, {
-            logger: m => {
-                if (m.status === 'recognizing text') {
-                    updateOCRText(`识别中... ${Math.round(m.progress * 100)}%`);
-                }
-            }
-        });
+function getCodeReader() {
+    if (!codeReader) {
+        codeReader = new ZXing.BrowserMultiFormatReader();
     }
-    return ocrWorker;
+    return codeReader;
 }
 
 function showOCRMask(text) {
@@ -209,8 +198,8 @@ function hideOCRMask() {
     document.getElementById('ocr-mask').classList.remove('show');
 }
 
-// 拍照并OCR识别
-function captureAndOCR(target) {
+// 拍照并扫码识别
+function captureAndScan(target) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
@@ -219,81 +208,60 @@ function captureAndOCR(target) {
         const file = e.target.files[0];
         if (!file) return;
 
-        showOCRMask('正在识别文字...');
+        showOCRMask('正在识别二维码...');
 
         try {
-            const dataUrl = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = ev => resolve(ev.target.result);
-                reader.readAsDataURL(file);
-            });
+            const reader = getCodeReader();
+            const img = new Image();
+            const imgSrc = URL.createObjectURL(file);
+            
+            img.onload = async function() {
+                try {
+                    const result = await reader.decodeFromImageElement(img);
+                    const scannedText = result.getText().trim();
+                    
+                    URL.revokeObjectURL(imgSrc);
+                    hideOCRMask();
 
-            const compressed = await compressImage(dataUrl, 1200, 0.85);
-
-            // 如果是录入页SN输入框，同时保存SN图片
-            if (target === 'sn') {
-                photoData.sn = compressed;
-                showPhotoPreview('sn', compressed);
-            }
-
-            const worker = await getOCRWorker();
-            const { data: { text } } = await worker.recognize(compressed);
-
-            // 清理识别结果，提取可能的SN码
-            const cleaned = cleanOCRText(text);
-
-            hideOCRMask();
-
-            if (target === 'sn') {
-                document.getElementById('sn').value = cleaned;
-                showToast('识别完成');
-            } else if (target === 'search') {
-                document.getElementById('search-input').value = cleaned;
-                doSearch();
-            }
+                    if (target === 'sn') {
+                        document.getElementById('sn').value = scannedText;
+                        // 同时保存扫码时的图片
+                        const dataUrl = await fileToDataURL(file);
+                        const compressed = await compressImage(dataUrl, 800, 0.7);
+                        photoData.sn = compressed;
+                        showPhotoPreview('sn', compressed);
+                        showToast('扫码识别成功');
+                    } else if (target === 'search') {
+                        document.getElementById('search-input').value = scannedText;
+                        doSearch();
+                    }
+                } catch (err) {
+                    URL.revokeObjectURL(imgSrc);
+                    hideOCRMask();
+                    showToast('未识别到二维码，请重试');
+                }
+            };
+            img.onerror = function() {
+                URL.revokeObjectURL(imgSrc);
+                hideOCRMask();
+                showToast('图片加载失败');
+            };
+            img.src = imgSrc;
         } catch (err) {
             console.error(err);
             hideOCRMask();
-            showToast('识别失败，请重试');
+            showToast('扫码失败，请重试');
         }
     };
     input.click();
 }
 
-// 从已上传图片OCR
-function ocrFromImage(dataUrl) {
-    // 重新获取完整图片
-    const fullSrc = document.querySelector('#sn-preview img').src;
-    showOCRMask('正在识别文字...');
-
-    (async () => {
-        try {
-            const worker = await getOCRWorker();
-            const { data: { text } } = await worker.recognize(fullSrc);
-            const cleaned = cleanOCRText(text);
-            hideOCRMask();
-            document.getElementById('sn').value = cleaned;
-            showToast('识别完成');
-        } catch (err) {
-            console.error(err);
-            hideOCRMask();
-            showToast('识别失败');
-        }
-    })();
-}
-
-// 清理OCR文本，提取SN码
-function cleanOCRText(text) {
-    if (!text) return '';
-    // 去除多余空白，保留字母数字和常见符号
-    let cleaned = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-    // 尝试提取SN码相关行
-    const snMatch = cleaned.match(/(?:SN|Serial|序列号|sn)[::\s]*([A-Za-z0-9\-_]{4,})/i);
-    if (snMatch) {
-        return snMatch[1];
-    }
-    // 如果提取不到，返回清理后的文本
-    return cleaned.substring(0, 50);
+function fileToDataURL(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(file);
+    });
 }
 
 // ===== 搜索功能 =====
@@ -482,10 +450,10 @@ function updateDashboard() {
     document.getElementById('dash-in').textContent = inCount;
     document.getElementById('dash-out').textContent = outCount;
 
-    renderStatList('type-stats', groupBy(devices, 'type'), '种');
-    renderStatList('status-stats', groupBy(devices, 'status'), '项');
-    renderStatList('mfr-stats', groupBy(devices, 'manufacturer'), '项');
-    renderStatList('location-stats', groupBy(devices, 'location'), '项');
+    renderStatList('type-stats', groupBy(devices, 'type'), '种', 'type');
+    renderStatList('status-stats', groupBy(devices, 'status'), '项', 'status');
+    renderStatList('mfr-stats', groupBy(devices, 'manufacturer'), '项', 'manufacturer');
+    renderStatList('location-stats', groupBy(devices, 'location'), '项', 'location');
 }
 
 function groupBy(arr, key) {
@@ -497,7 +465,7 @@ function groupBy(arr, key) {
     return Object.entries(result).sort((a, b) => b[1] - a[1]);
 }
 
-function renderStatList(elId, data, unit) {
+function renderStatList(elId, data, unit, field) {
     const el = document.getElementById(elId);
     const max = data.length > 0 ? data[0][1] : 1;
 
@@ -507,53 +475,126 @@ function renderStatList(elId, data, unit) {
     }
 
     el.innerHTML = data.slice(0, 10).map(([label, count]) => `
-        <div class="stat-row">
+        <div class="stat-row clickable" onclick="showTypeFilter('${field}','${label.replace(/'/g, "\\'")}')">
             <span class="label">${label}</span>
             <div class="stat-bar"><div class="stat-bar-fill" style="width:${(count / max) * 100}%"></div></div>
-            <span class="value">${count}${unit}</span>
+            <span class="value">${count}${unit} <span style="color:#1677ff;font-size:11px;">›</span></span>
         </div>
     `).join('');
 }
 
-// ===== 导出Excel =====
-function exportExcel() {
+// 类型筛选弹窗
+function showTypeFilter(field, value) {
+    const devices = getDevices();
+    const filtered = devices.filter(d => (d[field] || '未填写') === value);
+
+    document.getElementById('type-filter-title').textContent = `${value}（${filtered.length}条）`;
+    const listEl = document.getElementById('type-filter-list');
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = '<p class="empty-tip">暂无数据</p>';
+    } else {
+        listEl.innerHTML = filtered.map(d => `
+            <div class="filter-device-item" onclick="closeTypeFilter();viewDevice('${d.id}')">
+                <div class="filter-device-name">${d.name}</div>
+                <div class="filter-device-sn">SN: ${d.sn}</div>
+                <div class="filter-device-meta">
+                    <span>${d.type}</span>
+                    <span>${d.manufacturer}</span>
+                    <span>${d.quantity}${d.unit}</span>
+                    <span style="color:${getStatusColor(d.status)}">${d.status}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    document.getElementById('type-filter-modal').classList.add('show');
+}
+
+function closeTypeFilter() {
+    document.getElementById('type-filter-modal').classList.remove('show');
+}
+
+// ===== 导出Excel + 图片（ZIP打包） =====
+async function exportExcel() {
     const devices = getDevices();
     if (devices.length === 0) {
         showToast('暂无数据可导出');
         return;
     }
 
-    const exportData = devices.map(d => ({
-        '厂家': d.manufacturer,
-        '设备/备件类型': d.type,
-        '设备/备件名称': d.name,
-        '设备/备件型号': d.model,
-        '设备序列号SN码': d.sn,
-        '数量': d.quantity,
-        '单位': d.unit,
-        '设备/备件使用状态': d.status,
-        '存放地点': d.location,
-        '备注': d.remark,
-        '出库记录': d.outbound,
-        '录入时间': formatDate(d.createdAt)
-    }));
+    showOCRMask('正在打包导出...');
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '仓库设备数据');
+    try {
+        const exportData = devices.map(d => ({
+            '厂家': d.manufacturer,
+            '设备/备件类型': d.type,
+            '设备/备件名称': d.name,
+            '设备/备件型号': d.model,
+            '设备序列号SN码': d.sn,
+            '数量': d.quantity,
+            '单位': d.unit,
+            '设备/备件使用状态': d.status,
+            '存放地点': d.location,
+            '备注': d.remark,
+            '出库记录': d.outbound,
+            'SN码图片': (d.snPhoto ? 'images/' + d.sn + '_SN码.jpg' : ''),
+            '正面图片': (d.frontPhoto ? 'images/' + d.sn + '_正面.jpg' : ''),
+            '录入时间': formatDate(d.createdAt)
+        }));
 
-    // 设置列宽
-    ws['!cols'] = [
-        { wch: 15 }, { wch: 12 }, { wch: 18 }, { wch: 15 }, { wch: 20 },
-        { wch: 8 }, { wch: 6 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 18 }
-    ];
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '仓库设备数据');
 
-    const now = new Date();
-    const pad = n => n.toString().padStart(2, '0');
-    const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+        ws['!cols'] = [
+            { wch: 15 }, { wch: 12 }, { wch: 18 }, { wch: 15 }, { wch: 20 },
+            { wch: 8 }, { wch: 6 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 25 }, { wch: 25 }, { wch: 18 }
+        ];
 
-    XLSX.writeFile(wb, filename);
-    showToast('导出成功！');
+        const excelBlob = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+        // 创建ZIP包
+        const zip = new JSZip();
+        zip.file('仓库设备数据.xlsx', excelBlob);
+
+        const imagesFolder = zip.folder('images');
+        let imgCount = 0;
+
+        for (const d of devices) {
+            if (d.snPhoto) {
+                const base64 = d.snPhoto.split(',')[1];
+                imagesFolder.file(d.sn + '_SN码.jpg', base64, { base64: true });
+                imgCount++;
+            }
+            if (d.frontPhoto) {
+                const base64 = d.frontPhoto.split(',')[1];
+                imagesFolder.file(d.sn + '_正面.jpg', base64, { base64: true });
+                imgCount++;
+            }
+        }
+
+        const now = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.zip`;
+
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        hideOCRMask();
+        showToast(`导出成功！含${devices.length}条数据、${imgCount}张图片`);
+    } catch (err) {
+        console.error(err);
+        hideOCRMask();
+        showToast('导出失败，请重试');
+    }
 }
 
 // ===== 图片大图 =====
