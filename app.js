@@ -788,6 +788,25 @@ function closeImgModal() {
     document.getElementById('img-modal').classList.remove('show');
 }
 
+// ===== 版本检查 & 强制更新 =====
+function checkUpdate() {
+    if (confirm('检查到新版本，是否清除缓存并刷新？\n\n当前功能：\n1. SN码条形码扫码识别\n2. 导出Excel图片嵌入单元格\n3. 看板分类可点击查看')) {
+        // 注销旧的 service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+                registrations.forEach(reg => reg.unregister());
+            });
+        }
+        // 清除缓存
+        if ('caches' in window) {
+            caches.keys().then(keys => {
+                keys.forEach(key => caches.delete(key));
+            });
+        }
+        setTimeout(() => location.reload(true), 300);
+    }
+}
+
 // ===== 初始化 =====
 window.addEventListener('DOMContentLoaded', () => {
     updateHome();
