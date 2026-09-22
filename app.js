@@ -644,7 +644,7 @@ function closeTypeFilter() {
     document.getElementById('type-filter-modal').classList.remove('show');
 }
 
-// ===== 导出Excel + 图片（ZIP打包） =====
+// ===== 导出Excel（图片嵌入单元格） =====
 async function exportExcel() {
     const devices = getDevices();
     if (devices.length === 0) {
@@ -652,63 +652,114 @@ async function exportExcel() {
         return;
     }
 
-    showOCRMask('正在打包导出...');
+    showOCRMask('正在生成表格...');
 
     try {
-        const exportData = devices.map(d => ({
-            '厂家': d.manufacturer,
-            '设备/备件类型': d.type,
-            '设备/备件名称': d.name,
-            '设备/备件型号': d.model,
-            '设备序列号SN码': d.sn,
-            '数量': d.quantity,
-            '单位': d.unit,
-            '设备/备件使用状态': d.status,
-            '存放地点': d.location,
-            '备注': d.remark,
-            '出库记录': d.outbound,
-            'SN码图片': (d.snPhoto ? 'images/' + d.sn + '_SN码.jpg' : ''),
-            '正面图片': (d.frontPhoto ? 'images/' + d.sn + '_正面.jpg' : ''),
-            '录入时间': formatDate(d.createdAt)
-        }));
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = '仓库设备管理系统';
+        workbook.created = new Date();
 
-        const ws = XLSX.utils.json_to_sheet(exportData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '仓库设备数据');
+        const worksheet = workbook.addWorksheet('仓库设备数据');
 
-        ws['!cols'] = [
-            { wch: 15 }, { wch: 12 }, { wch: 18 }, { wch: 15 }, { wch: 20 },
-            { wch: 8 }, { wch: 6 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 25 }, { wch: 25 }, { wch: 18 }
+        // 表头
+        const headers = [
+            '厂家', '设备/备件类型', '设备/备件名称', '设备/备件型号',
+            '设备序列号SN码', 'SN码图片', '正面图片',
+            '数量', '单位', '设备/备件使用状态', '存放地点', '备注', '出库记录', '录入时间'
         ];
 
-        const excelBlob = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        worksheet.addRow(headers);
 
-        // 创建ZIP包
-        const zip = new JSZip();
-        zip.file('仓库设备数据.xlsx', excelBlob);
+        // 设置表头样式
+        const headerRow = worksheet.getRow(1);
+        headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1677FF' } };
+        headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        headerRow.height = 30;
 
-        const imagesFolder = zip.folder('images');
-        let imgCount = 0;
+        // 列宽设置
+        const colWidths = [
+            15, 12, 18, 15, 20, 15, 15, 8, 6, 14, 15, 20, 20, 18
+        ];
+        worksheet.columns.forEach((col, i) => {
+            col.width = colWidths[i] || 15;
+        });
 
-        for (const d of devices) {
+        // 设置行高（图片行）
+        const imgRowHeight = 100;
+
+        // 添加数据行
+        for (let i = 0; i < devices.length; i++) {
+            const d = devices[i];
+            const rowIdx = i + 2;
+
+            const row = worksheet.addRow([
+                d.manufacturer,
+                d.type,
+                d.name,
+                d.model,
+                d.sn,
+                '', // SN图片列
+                '', // 正面图片列
+                d.quantity,
+                d.unit,
+                d.status,
+                d.location,
+                d.remark,
+                d.outbound,
+                formatDate(d.createdAt)
+            ]);
+
+            row.height = imgRowHeight;
+            row.alignment = { vertical: 'middle', wrapText: true };
+
+            // 嵌入SN码图片到F列（第6列）
             if (d.snPhoto) {
-                const base64 = d.snPhoto.split(',')[1];
-                imagesFolder.file(d.sn + '_SN码.jpg', base64, { base64: true });
-                imgCount++;
+                try {
+                    const base64 = d.snPhoto.split(',')[1];
+                    const imageId = workbook.addImage({
+                        base64: base64,
+                        extension: 'jpeg'
+                    });
+                    worksheet.addImage(imageId, {
+                        tl: { col: 5, row: i + 1 },
+                        br: { col: 6, row: i + 2 }
+                    });
+                } catch (e) {
+                    worksheet.getCell(rowIdx, 6).value = '图片加载失败';
+                }
             }
+
+            // 嵌入正面图片到G列（第7列）
             if (d.frontPhoto) {
-                const base64 = d.frontPhoto.split(',')[1];
-                imagesFolder.file(d.sn + '_正面.jpg', base64, { base64: true });
-                imgCount++;
+                try {
+                    const base64 = d.frontPhoto.split(',')[1];
+                    const imageId = workbook.addImage({
+                        base64: base64,
+                        extension: 'jpeg'
+                    });
+                    worksheet.addImage(imageId, {
+                        tl: { col: 6, row: i + 1 },
+                        br: { col: 7, row: i + 2 }
+                    });
+                } catch (e) {
+                    worksheet.getCell(rowIdx, 7).value = '图片加载失败';
+                }
             }
         }
 
+        // 冻结首行
+        worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+        // 生成 Excel 文件
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
         const now = new Date();
         const pad = n => n.toString().padStart(2, '0');
-        const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.zip`;
+        const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 
-        const content = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(content);
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = filename;
@@ -718,7 +769,8 @@ async function exportExcel() {
         URL.revokeObjectURL(url);
 
         hideOCRMask();
-        showToast(`导出成功！含${devices.length}条数据、${imgCount}张图片`);
+        const imgCount = devices.filter(d => d.snPhoto || d.frontPhoto).length;
+        showToast(`导出成功！共${devices.length}条数据，${imgCount}条含图片`);
     } catch (err) {
         console.error(err);
         hideOCRMask();
