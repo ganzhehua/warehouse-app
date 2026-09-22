@@ -175,19 +175,10 @@ function compressImage(dataUrl, maxWidth, quality) {
     });
 }
 
-// ===== 条形码实时扫描 =====
-let codeReader = null;
-let scannerStream = null;
+// ===== 条形码扫描（Html5Qrcode + 拍照 + OCR 三重保障） =====
+let html5QrCode = null;
 let scannerActive = false;
-
-function getCodeReader() {
-    if (!codeReader) {
-        codeReader = new ZXing.BrowserMultiFormatReader(undefined, {
-            delayBetweenScanAttempts: 200
-        });
-    }
-    return codeReader;
-}
+let ocrWorker = null;
 
 function showOCRMask(text) {
     document.getElementById('ocr-text').textContent = text;
@@ -202,127 +193,196 @@ function hideOCRMask() {
     document.getElementById('ocr-mask').classList.remove('show');
 }
 
-// 启动实时摄像头扫码
+// 启动实时摄像头扫码（Html5Qrcode，手机端识别率更高）
 function startScanner(target) {
     const modal = document.getElementById('scanner-modal');
-    const video = document.getElementById('scanner-video');
+    const container = document.getElementById('scanner-container');
     modal.classList.add('show');
     scannerActive = true;
 
-    const reader = getCodeReader();
+    // 动态创建 Html5Qrcode 扫描容器
+    container.innerHTML = `
+        <div class="scanner-header">
+            <h3>条形码扫描</h3>
+            <button class="scanner-close" onclick="stopScanner()">×</button>
+        </div>
+        <div id="qr-reader" style="width:100%;"></div>
+        <div class="scanner-tips">
+            <div class="scanner-frame-mini"></div>
+            <p>将条形码对准框内，保持1-2秒</p>
+        </div>
+        <div class="scanner-btns">
+            <button class="btn-secondary" onclick="stopScanner();captureBarcodeImage('${target}')">📷 拍照识别</button>
+            <button class="btn-secondary" onclick="stopScanner()">取消</button>
+        </div>
+    `;
 
-    // 使用后置摄像头
-    const constraints = {
-        video: { facingMode: 'environment' }
+    html5QrCode = new Html5Qrcode('qr-reader');
+
+    const config = {
+        fps: 10,
+        qrbox: { width: 280, height: 100 },
+        aspectRatio: 2.0,
+        formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.CODE_93,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.ITF,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODABAR,
+            Html5QrcodeSupportedFormats.QR_CODE
+        ]
     };
 
-    navigator.mediaDevices.getUserMedia(constraints).then(stream => {
-        scannerStream = stream;
-        video.srcObject = stream;
-        video.play();
+    html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText) => {
+            if (!scannerActive) return;
+            scannerActive = false;
+            stopScanner();
 
-        // 从视频流持续解码条形码
-        reader.decodeFromVideoDevice(undefined, video, (result, err) => {
-            if (result && scannerActive) {
-                const scannedText = result.getText().trim();
-                if (scannedText) {
-                    scannerActive = false;
-                    stopScanner();
-
-                    if (target === 'sn') {
-                        document.getElementById('sn').value = scannedText;
-                        showToast('扫码成功：' + scannedText);
-                    } else if (target === 'search') {
-                        document.getElementById('search-input').value = scannedText;
-                        doSearch();
-                    }
-                }
+            const sn = decodedText.trim();
+            if (target === 'sn') {
+                document.getElementById('sn').value = sn;
+                showToast('扫码成功：' + sn);
+            } else if (target === 'search') {
+                document.getElementById('search-input').value = sn;
+                doSearch();
             }
-        });
-    }).catch(err => {
+        },
+        () => {} // 忽略持续的失败回调
+    ).catch(err => {
         console.error('摄像头启动失败:', err);
+        // 回退到拍照模式
         stopScanner();
-        // 摄像头不可用时回退到拍照模式
-        captureAndScanFallback(target);
+        captureBarcodeImage(target);
     });
 }
 
-// 停止扫描
+// 停止实时扫码
 function stopScanner() {
     scannerActive = false;
-    document.getElementById('scanner-modal').classList.remove('show');
+    const modal = document.getElementById('scanner-modal');
+    modal.classList.remove('show');
 
-    if (scannerStream) {
-        scannerStream.getTracks().forEach(track => track.stop());
-        scannerStream = null;
+    if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => {
+            html5QrCode.clear();
+        }).catch(() => {});
     }
-
-    const video = document.getElementById('scanner-video');
-    if (video.srcObject) {
-        video.srcObject = null;
-    }
+    html5QrCode = null;
 }
 
-// 摄像头不可用时的回退方案：拍照后识别
-function captureAndScanFallback(target) {
-    showOCRMask('正在启动拍照模式...');
-
+// 拍照识别：先试条码，不行再 OCR 识别 S/N 文字
+function captureBarcodeImage(target) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
     input.capture = 'environment';
     input.onchange = async function (e) {
         const file = e.target.files[0];
-        if (!file) {
-            hideOCRMask();
-            return;
-        }
+        if (!file) return;
 
-        showOCRMask('正在识别条形码...');
+        showOCRMask('正在识别...');
 
         try {
-            const reader = getCodeReader();
-            const img = new Image();
-            const imgSrc = URL.createObjectURL(file);
+            const result = await tryDecodeBarcode(file);
+            if (result) {
+                hideOCRMask();
+                if (target === 'sn') {
+                    document.getElementById('sn').value = result;
+                    const dataUrl = await fileToDataURL(file);
+                    const compressed = await compressImage(dataUrl, 800, 0.7);
+                    photoData.sn = compressed;
+                    showPhotoPreview('sn', compressed);
+                    showToast('识别成功：' + result);
+                } else if (target === 'search') {
+                    document.getElementById('search-input').value = result;
+                    doSearch();
+                }
+            } else {
+                // 条码识别不到，回退 OCR 识别 S/N 文字
+                updateOCRText('条码未识别，正在识别文字...');
+                const ocrResult = await tryOCR_SN(file);
+                hideOCRMask();
 
-            img.onload = async function () {
-                try {
-                    const result = await reader.decodeFromImageElement(img);
-                    const scannedText = result.getText().trim();
-
-                    URL.revokeObjectURL(imgSrc);
-                    hideOCRMask();
-
+                if (ocrResult) {
                     if (target === 'sn') {
-                        document.getElementById('sn').value = scannedText;
+                        document.getElementById('sn').value = ocrResult;
                         const dataUrl = await fileToDataURL(file);
                         const compressed = await compressImage(dataUrl, 800, 0.7);
                         photoData.sn = compressed;
                         showPhotoPreview('sn', compressed);
-                        showToast('扫码成功：' + scannedText);
+                        showToast('OCR识别成功：' + ocrResult);
                     } else if (target === 'search') {
-                        document.getElementById('search-input').value = scannedText;
+                        document.getElementById('search-input').value = ocrResult;
                         doSearch();
                     }
-                } catch (err) {
-                    URL.revokeObjectURL(imgSrc);
-                    hideOCRMask();
-                    showToast('未识别到条形码，请重试');
+                } else {
+                    showToast('未能识别，请重试或手动输入');
                 }
-            };
-            img.onerror = function () {
-                URL.revokeObjectURL(imgSrc);
-                hideOCRMask();
-                showToast('图片加载失败');
-            };
-            img.src = imgSrc;
+            }
         } catch (err) {
             console.error(err);
             hideOCRMask();
-            showToast('扫码失败，请重试');
+            showToast('识别失败，请重试');
         }
     };
     input.click();
+}
+
+// 用 Html5Qrcode 解码静态图片中的条码
+async function tryDecodeBarcode(file) {
+    try {
+        const reader = new Html5Qrcode('qr-reader-file');
+        // 临时创建隐藏的 container
+        const hiddenDiv = document.createElement('div');
+        hiddenDiv.id = 'qr-reader-file';
+        hiddenDiv.style.display = 'none';
+        document.body.appendChild(hiddenDiv);
+
+        const dataUrl = await fileToDataURL(file);
+        const result = await reader.scanFile(dataUrl, false);
+
+        document.body.removeChild(hiddenDiv);
+        return result ? result.trim() : null;
+    } catch (err) {
+        return null;
+    }
+}
+
+// OCR 识别图片中的 S/N: 文字
+async function tryOCR_SN(file) {
+    try {
+        if (!ocrWorker) {
+            updateOCRText('加载OCR引擎...');
+            ocrWorker = await Tesseract.createWorker('eng', 1);
+        }
+
+        const dataUrl = await fileToDataURL(file);
+        const { data: { text } } = await ocrWorker.recognize(dataUrl);
+
+        // 尝试提取 S/N: 后面的内容（你的条码上方有 "S/N:033DWF6RL4500179" 这种格式）
+        const snMatch = text.match(/S\/N[::\s]*([A-Za-z0-9\-_]{6,30})/i);
+        if (snMatch) {
+            return snMatch[1];
+        }
+
+        // 如果没有 S/N 前缀，尝试提取纯字母数字串
+        const allMatches = text.match(/[A-Z0-9]{6,}/g);
+        if (allMatches && allMatches.length > 0) {
+            // 取最长的那个（通常 SN 码最长）
+            return allMatches.sort((a, b) => b.length - a.length)[0];
+        }
+
+        return null;
+    } catch (err) {
+        return null;
+    }
 }
 
 function fileToDataURL(file) {

@@ -1,6 +1,6 @@
 // ===== Service Worker - 离线缓存 =====
 
-const CACHE_NAME = 'warehouse-app-v3';
+const CACHE_NAME = 'warehouse-app-v4';
 const OFFLINE_URL = 'index.html';
 
 // 需要缓存的核心文件
@@ -10,7 +10,8 @@ const PRECACHE_URLS = [
   './style.css',
   './app.js',
   './manifest.json',
-  'https://unpkg.com/@zxing/library@0.21.3',
+  'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
   'https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js'
 ];

@@ -18,8 +18,10 @@
     <link rel="shortcut icon" href="icons/icon-192.png">
     <title>仓库设备管理系统</title>
     <link rel="stylesheet" href="style.css">
-    <!-- ZXing 二维码识别库 -->
-    <script src="https://unpkg.com/@zxing/library@0.21.3"></script>
+    <!-- Html5Qrcode 条形码扫描库（识别率更高） -->
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- Tesseract OCR 备用识别 S/N 文字 -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <!-- SheetJS Excel导出库 -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- JSZip 打包导出图片 -->
@@ -290,21 +292,8 @@
 
     <!-- 实时摄像头扫码弹窗 -->
     <div id="scanner-modal" class="scanner-modal">
-        <div class="scanner-container">
-            <div class="scanner-header">
-                <h3>条形码扫描</h3>
-                <button class="scanner-close" onclick="stopScanner()">×</button>
-            </div>
-            <div class="scanner-view">
-                <video id="scanner-video" autoplay playsinline></video>
-                <div class="scanner-overlay">
-                    <div class="scanner-frame"></div>
-                    <p class="scanner-tip">将条形码对准框内</p>
-                </div>
-            </div>
-            <div class="scanner-actions">
-                <button class="btn-secondary" onclick="stopScanner()">取消</button>
-            </div>
+        <div id="scanner-container" class="scanner-container">
+            <!-- 内容由 JS 动态填充 -->
         </div>
     </div>
 
