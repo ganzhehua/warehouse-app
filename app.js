@@ -815,7 +815,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // ===== PWA Service Worker 注册 =====
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
+        navigator.serviceWorker.register('./service-worker.js?v=2.0')
             .then(registration => {
                 console.log('ServiceWorker 注册成功，作用域:', registration.scope);
             })
