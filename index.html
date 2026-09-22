@@ -134,7 +134,7 @@
                     <label>设备序列号SN码 <span class="required">*</span></label>
                     <div class="sn-input-group">
                         <input type="text" id="sn" placeholder="请输入或拍照识别SN码" required>
-                        <button type="button" class="btn-ocr" onclick="captureAndScan('sn')">📷 扫码识别</button>
+                        <button type="button" class="btn-ocr" onclick="startScanner('sn')">📷 扫码识别</button>
                     </div>
                 </div>
 
@@ -208,7 +208,7 @@
 
             <div class="search-bar">
                 <input type="text" id="search-input" placeholder="输入SN码进行搜索...">
-                <button class="btn-ocr" onclick="captureAndScan('search')">📷 扫码</button>
+                <button class="btn-ocr" onclick="startScanner('search')">📷 扫码</button>
                 <button class="btn-primary" onclick="doSearch()">搜索</button>
             </div>
 
@@ -284,7 +284,27 @@
     <div id="ocr-mask" class="ocr-mask">
         <div class="ocr-loading">
             <div class="spinner"></div>
-            <p id="ocr-text">正在识别二维码...</p>
+            <p id="ocr-text">正在识别条形码...</p>
+        </div>
+    </div>
+
+    <!-- 实时摄像头扫码弹窗 -->
+    <div id="scanner-modal" class="scanner-modal">
+        <div class="scanner-container">
+            <div class="scanner-header">
+                <h3>条形码扫描</h3>
+                <button class="scanner-close" onclick="stopScanner()">×</button>
+            </div>
+            <div class="scanner-view">
+                <video id="scanner-video" autoplay playsinline></video>
+                <div class="scanner-overlay">
+                    <div class="scanner-frame"></div>
+                    <p class="scanner-tip">将条形码对准框内</p>
+                </div>
+            </div>
+            <div class="scanner-actions">
+                <button class="btn-secondary" onclick="stopScanner()">取消</button>
+            </div>
         </div>
     </div>
 

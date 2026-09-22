@@ -175,12 +175,16 @@ function compressImage(dataUrl, maxWidth, quality) {
     });
 }
 
-// ===== 二维码识别 =====
+// ===== 条形码实时扫描 =====
 let codeReader = null;
+let scannerStream = null;
+let scannerActive = false;
 
 function getCodeReader() {
     if (!codeReader) {
-        codeReader = new ZXing.BrowserMultiFormatReader();
+        codeReader = new ZXing.BrowserMultiFormatReader(undefined, {
+            delayBetweenScanAttempts: 200
+        });
     }
     return codeReader;
 }
@@ -198,39 +202,104 @@ function hideOCRMask() {
     document.getElementById('ocr-mask').classList.remove('show');
 }
 
-// 拍照并扫码识别
-function captureAndScan(target) {
+// 启动实时摄像头扫码
+function startScanner(target) {
+    const modal = document.getElementById('scanner-modal');
+    const video = document.getElementById('scanner-video');
+    modal.classList.add('show');
+    scannerActive = true;
+
+    const reader = getCodeReader();
+
+    // 使用后置摄像头
+    const constraints = {
+        video: { facingMode: 'environment' }
+    };
+
+    navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+        scannerStream = stream;
+        video.srcObject = stream;
+        video.play();
+
+        // 从视频流持续解码条形码
+        reader.decodeFromVideoDevice(undefined, video, (result, err) => {
+            if (result && scannerActive) {
+                const scannedText = result.getText().trim();
+                if (scannedText) {
+                    scannerActive = false;
+                    stopScanner();
+
+                    if (target === 'sn') {
+                        document.getElementById('sn').value = scannedText;
+                        showToast('扫码成功：' + scannedText);
+                    } else if (target === 'search') {
+                        document.getElementById('search-input').value = scannedText;
+                        doSearch();
+                    }
+                }
+            }
+        });
+    }).catch(err => {
+        console.error('摄像头启动失败:', err);
+        stopScanner();
+        // 摄像头不可用时回退到拍照模式
+        captureAndScanFallback(target);
+    });
+}
+
+// 停止扫描
+function stopScanner() {
+    scannerActive = false;
+    document.getElementById('scanner-modal').classList.remove('show');
+
+    if (scannerStream) {
+        scannerStream.getTracks().forEach(track => track.stop());
+        scannerStream = null;
+    }
+
+    const video = document.getElementById('scanner-video');
+    if (video.srcObject) {
+        video.srcObject = null;
+    }
+}
+
+// 摄像头不可用时的回退方案：拍照后识别
+function captureAndScanFallback(target) {
+    showOCRMask('正在启动拍照模式...');
+
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
     input.capture = 'environment';
     input.onchange = async function (e) {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) {
+            hideOCRMask();
+            return;
+        }
 
-        showOCRMask('正在识别二维码...');
+        showOCRMask('正在识别条形码...');
 
         try {
             const reader = getCodeReader();
             const img = new Image();
             const imgSrc = URL.createObjectURL(file);
-            
-            img.onload = async function() {
+
+            img.onload = async function () {
                 try {
                     const result = await reader.decodeFromImageElement(img);
                     const scannedText = result.getText().trim();
-                    
+
                     URL.revokeObjectURL(imgSrc);
                     hideOCRMask();
 
                     if (target === 'sn') {
                         document.getElementById('sn').value = scannedText;
-                        // 同时保存扫码时的图片
                         const dataUrl = await fileToDataURL(file);
                         const compressed = await compressImage(dataUrl, 800, 0.7);
                         photoData.sn = compressed;
                         showPhotoPreview('sn', compressed);
-                        showToast('扫码识别成功');
+                        showToast('扫码成功：' + scannedText);
                     } else if (target === 'search') {
                         document.getElementById('search-input').value = scannedText;
                         doSearch();
@@ -238,10 +307,10 @@ function captureAndScan(target) {
                 } catch (err) {
                     URL.revokeObjectURL(imgSrc);
                     hideOCRMask();
-                    showToast('未识别到二维码，请重试');
+                    showToast('未识别到条形码，请重试');
                 }
             };
-            img.onerror = function() {
+            img.onerror = function () {
                 URL.revokeObjectURL(imgSrc);
                 hideOCRMask();
                 showToast('图片加载失败');
