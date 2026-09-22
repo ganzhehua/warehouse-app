@@ -115,14 +115,7 @@
 
                 <div class="form-group">
                     <label>设备/备件类型 <span class="required">*</span></label>
-                    <select id="type" required>
-                        <option value="">请选择类型</option>
-                        <option value="设备">设备</option>
-                        <option value="备件">备件</option>
-                        <option value="工具">工具</option>
-                        <option value="耗材">耗材</option>
-                        <option value="其他">其他</option>
-                    </select>
+                    <input type="text" id="type" placeholder="请输入类型，如：设备、备件、工具等" required>
                 </div>
 
                 <div class="form-group">
@@ -183,20 +176,29 @@
 
                 <div class="form-group">
                     <label>设备/备件使用状态 <span class="required">*</span></label>
-                    <select id="status" required>
-                        <option value="">请选择状态</option>
-                        <option value="在库-未使用">在库-未使用</option>
-                        <option value="在库-已使用">在库-已使用</option>
-                        <option value="在库-待维修">在库-待维修</option>
-                        <option value="出库">出库</option>
-                        <option value="维修中">维修中</option>
-                        <option value="报废">报废</option>
-                    </select>
+                    <input type="text" id="status" placeholder="请输入状态，如：在库、出库、维修中等" required>
                 </div>
 
                 <div class="form-group">
                     <label>存放地点 <span class="required">*</span></label>
-                    <input type="text" id="location" placeholder="例如：A区-03货架-第2层" required>
+                    <input type="text" id="location" placeholder="请选择或输入存放地点" list="location-list" required>
+                    <datalist id="location-list">
+                        <option value="A区-01货架-第1层">
+                        <option value="A区-01货架-第2层">
+                        <option value="A区-01货架-第3层">
+                        <option value="A区-02货架-第1层">
+                        <option value="A区-02货架-第2层">
+                        <option value="A区-02货架-第3层">
+                        <option value="B区-01货架-第1层">
+                        <option value="B区-01货架-第2层">
+                        <option value="B区-02货架-第1层">
+                        <option value="B区-02货架-第2层">
+                        <option value="C区-01货架-第1层">
+                        <option value="C区-01货架-第2层">
+                        <option value="暂存区">
+                        <option value="待检区">
+                        <option value="退货区">
+                    </datalist>
                 </div>
 
                 <div class="form-group">
@@ -286,15 +288,7 @@
 
             <div class="list-filter">
                 <input type="text" id="list-filter" placeholder="搜索名称/SN/型号/地点..." oninput="renderList()">
-                <select id="status-filter" onchange="renderList()">
-                    <option value="">全部状态</option>
-                    <option value="在库-未使用">在库-未使用</option>
-                    <option value="在库-已使用">在库-已使用</option>
-                    <option value="在库-待维修">在库-待维修</option>
-                    <option value="出库">出库</option>
-                    <option value="维修中">维修中</option>
-                    <option value="报废">报废</option>
-                </select>
+                <input type="text" id="status-filter" placeholder="筛选状态..." oninput="renderList()">
             </div>
 
             <div id="device-list" class="device-list"></div>

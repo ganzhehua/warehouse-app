@@ -356,7 +356,7 @@ function renderList() {
         );
     }
     if (statusFilter) {
-        filtered = filtered.filter(d => d.status === statusFilter);
+        filtered = filtered.filter(d => d.status.toLowerCase().includes(statusFilter.toLowerCase()));
     }
 
     const listEl = document.getElementById('device-list');
