@@ -661,14 +661,23 @@ async function exportExcel() {
 
         const worksheet = workbook.addWorksheet('仓库设备数据');
 
-        // 表头
-        const headers = [
-            '厂家', '设备/备件类型', '设备/备件名称', '设备/备件型号',
-            '设备序列号SN码', 'SN码图片', '正面图片',
-            '数量', '单位', '设备/备件使用状态', '存放地点', '备注', '出库记录', '录入时间'
+        // 定义列结构（确保表头与数据精准对应）
+        worksheet.columns = [
+            { header: '厂家',              key: 'manufacturer', width: 15 },
+            { header: '设备/备件类型',     key: 'type',         width: 12 },
+            { header: '设备/备件名称',     key: 'name',         width: 18 },
+            { header: '设备/备件型号',     key: 'model',        width: 15 },
+            { header: '设备序列号SN码',    key: 'sn',           width: 20 },
+            { header: 'SN码图片',          key: 'snPhoto',      width: 16 },
+            { header: '正面图片',          key: 'frontPhoto',   width: 16 },
+            { header: '数量',              key: 'quantity',     width: 8  },
+            { header: '单位',              key: 'unit',         width: 6  },
+            { header: '设备/备件使用状态', key: 'status',       width: 14 },
+            { header: '存放地点',          key: 'location',     width: 15 },
+            { header: '备注',              key: 'remark',       width: 20 },
+            { header: '出库记录',          key: 'outbound',     width: 20 },
+            { header: '录入时间',          key: 'createdAt',    width: 18 }
         ];
-
-        worksheet.addRow(headers);
 
         // 设置表头样式
         const headerRow = worksheet.getRow(1);
@@ -677,43 +686,34 @@ async function exportExcel() {
         headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         headerRow.height = 30;
 
-        // 列宽设置
-        const colWidths = [
-            15, 12, 18, 15, 20, 15, 15, 8, 6, 14, 15, 20, 20, 18
-        ];
-        worksheet.columns.forEach((col, i) => {
-            col.width = colWidths[i] || 15;
-        });
+        const imgRowHeight = 110;
 
-        // 设置行高（图片行）
-        const imgRowHeight = 100;
-
-        // 添加数据行
+        // 按列定义的 key 写入数据（确保精准对应）
         for (let i = 0; i < devices.length; i++) {
             const d = devices[i];
-            const rowIdx = i + 2;
+            const rowNum = i + 2; // Excel行号（第1行是表头）
 
-            const row = worksheet.addRow([
-                d.manufacturer,
-                d.type,
-                d.name,
-                d.model,
-                d.sn,
-                '', // SN图片列
-                '', // 正面图片列
-                d.quantity,
-                d.unit,
-                d.status,
-                d.location,
-                d.remark,
-                d.outbound,
-                formatDate(d.createdAt)
-            ]);
+            const row = worksheet.addRow({
+                manufacturer: d.manufacturer || '',
+                type:         d.type || '',
+                name:         d.name || '',
+                model:        d.model || '',
+                sn:           d.sn || '',
+                snPhoto:      '', // 图片列留空，后续嵌入图片
+                frontPhoto:   '',
+                quantity:     d.quantity || 0,
+                unit:         d.unit || '',
+                status:       d.status || '',
+                location:     d.location || '',
+                remark:       d.remark || '',
+                outbound:     d.outbound || '',
+                createdAt:    formatDate(d.createdAt)
+            });
 
             row.height = imgRowHeight;
             row.alignment = { vertical: 'middle', wrapText: true };
 
-            // 嵌入SN码图片到F列（第6列）
+            // 嵌入SN码图片 → 第6列（F列，key: snPhoto）
             if (d.snPhoto) {
                 try {
                     const base64 = d.snPhoto.split(',')[1];
@@ -722,15 +722,16 @@ async function exportExcel() {
                         extension: 'jpeg'
                     });
                     worksheet.addImage(imageId, {
-                        tl: { col: 5, row: i + 1 },
-                        br: { col: 6, row: i + 2 }
+                        tl: { col: 5, row: rowNum - 1 },  // 0-based: 第6列, 第rowNum行
+                        br: { col: 6, row: rowNum },      // 到第7列, 第rowNum+1行
+                        editAs: 'oneCell'
                     });
                 } catch (e) {
-                    worksheet.getCell(rowIdx, 6).value = '图片加载失败';
+                    worksheet.getCell(rowNum, 6).value = '[图片]';
                 }
             }
 
-            // 嵌入正面图片到G列（第7列）
+            // 嵌入正面图片 → 第7列（G列，key: frontPhoto）
             if (d.frontPhoto) {
                 try {
                     const base64 = d.frontPhoto.split(',')[1];
@@ -739,11 +740,12 @@ async function exportExcel() {
                         extension: 'jpeg'
                     });
                     worksheet.addImage(imageId, {
-                        tl: { col: 6, row: i + 1 },
-                        br: { col: 7, row: i + 2 }
+                        tl: { col: 6, row: rowNum - 1 },  // 0-based: 第7列, 第rowNum行
+                        br: { col: 7, row: rowNum },      // 到第8列, 第rowNum+1行
+                        editAs: 'oneCell'
                     });
                 } catch (e) {
-                    worksheet.getCell(rowIdx, 7).value = '图片加载失败';
+                    worksheet.getCell(rowNum, 7).value = '[图片]';
                 }
             }
         }
@@ -753,11 +755,13 @@ async function exportExcel() {
 
         // 生成 Excel 文件
         const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const blob = new Blob([buffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
 
         const now = new Date();
         const pad = n => n.toString().padStart(2, '0');
-        const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+        const filename = `仓库设备数据_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
