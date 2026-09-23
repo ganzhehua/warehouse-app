@@ -661,26 +661,41 @@ async function exportExcel() {
 
         const worksheet = workbook.addWorksheet('仓库设备数据');
 
-        // 定义列结构（确保表头与数据精准对应）
+        // 定义列结构（仅key和宽度，不用header自动生成，避免行号偏差）
         worksheet.columns = [
-            { header: '厂家',              key: 'manufacturer', width: 15 },
-            { header: '设备/备件类型',     key: 'type',         width: 12 },
-            { header: '设备/备件名称',     key: 'name',         width: 18 },
-            { header: '设备/备件型号',     key: 'model',        width: 15 },
-            { header: '设备序列号SN码',    key: 'sn',           width: 20 },
-            { header: 'SN码图片',          key: 'snPhoto',      width: 16 },
-            { header: '正面图片',          key: 'frontPhoto',   width: 16 },
-            { header: '数量',              key: 'quantity',     width: 8  },
-            { header: '单位',              key: 'unit',         width: 6  },
-            { header: '设备/备件使用状态', key: 'status',       width: 14 },
-            { header: '存放地点',          key: 'location',     width: 15 },
-            { header: '备注',              key: 'remark',       width: 20 },
-            { header: '出库记录',          key: 'outbound',     width: 20 },
-            { header: '录入时间',          key: 'createdAt',    width: 18 }
+            { key: 'manufacturer', width: 15 },
+            { key: 'type',         width: 12 },
+            { key: 'name',         width: 18 },
+            { key: 'model',        width: 15 },
+            { key: 'sn',           width: 20 },
+            { key: 'snPhoto',      width: 16 },
+            { key: 'frontPhoto',   width: 16 },
+            { key: 'quantity',     width: 8  },
+            { key: 'unit',         width: 6  },
+            { key: 'status',       width: 14 },
+            { key: 'location',     width: 15 },
+            { key: 'remark',       width: 20 },
+            { key: 'outbound',     width: 20 },
+            { key: 'createdAt',    width: 18 }
         ];
 
-        // 设置表头样式
-        const headerRow = worksheet.getRow(1);
+        // 手动添加表头行 → 确保是第1行
+        const headerRow = worksheet.addRow({
+            manufacturer: '厂家',
+            type:         '设备/备件类型',
+            name:         '设备/备件名称',
+            model:        '设备/备件型号',
+            sn:           '设备序列号SN码',
+            snPhoto:      'SN码图片',
+            frontPhoto:   '正面图片',
+            quantity:     '数量',
+            unit:         '单位',
+            status:       '设备/备件使用状态',
+            location:     '存放地点',
+            remark:       '备注',
+            outbound:     '出库记录',
+            createdAt:    '录入时间'
+        });
         headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1677FF' } };
         headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
@@ -688,10 +703,9 @@ async function exportExcel() {
 
         const imgRowHeight = 110;
 
-        // 按列定义的 key 写入数据（确保精准对应）
+        // 逐行添加数据，用 row.number 获取真实行号定位图片
         for (let i = 0; i < devices.length; i++) {
             const d = devices[i];
-            const rowNum = i + 2; // Excel行号（第1行是表头）
 
             const row = worksheet.addRow({
                 manufacturer: d.manufacturer || '',
@@ -699,7 +713,7 @@ async function exportExcel() {
                 name:         d.name || '',
                 model:        d.model || '',
                 sn:           d.sn || '',
-                snPhoto:      '', // 图片列留空，后续嵌入图片
+                snPhoto:      '',
                 frontPhoto:   '',
                 quantity:     d.quantity || 0,
                 unit:         d.unit || '',
@@ -710,10 +724,13 @@ async function exportExcel() {
                 createdAt:    formatDate(d.createdAt)
             });
 
+            // 用 ExcelJS 返回的真实行号（1-based），转 0-based 给图片定位
+            const imgRow0 = row.number - 1; // 0-based 行号
+
             row.height = imgRowHeight;
             row.alignment = { vertical: 'middle', wrapText: true };
 
-            // 嵌入SN码图片 → 第6列（F列，key: snPhoto）
+            // 嵌入SN码图片 → F列（col=5, 0-based）
             if (d.snPhoto) {
                 try {
                     const base64 = d.snPhoto.split(',')[1];
@@ -722,16 +739,16 @@ async function exportExcel() {
                         extension: 'jpeg'
                     });
                     worksheet.addImage(imageId, {
-                        tl: { col: 5, row: rowNum - 1 },  // 0-based: 第6列, 第rowNum行
-                        br: { col: 6, row: rowNum },      // 到第7列, 第rowNum+1行
+                        tl: { col: 5, row: imgRow0 },
+                        br: { col: 6, row: imgRow0 + 1 },
                         editAs: 'oneCell'
                     });
                 } catch (e) {
-                    worksheet.getCell(rowNum, 6).value = '[图片]';
+                    row.getCell(6).value = '[图片]';
                 }
             }
 
-            // 嵌入正面图片 → 第7列（G列，key: frontPhoto）
+            // 嵌入正面图片 → G列（col=6, 0-based）
             if (d.frontPhoto) {
                 try {
                     const base64 = d.frontPhoto.split(',')[1];
@@ -740,12 +757,12 @@ async function exportExcel() {
                         extension: 'jpeg'
                     });
                     worksheet.addImage(imageId, {
-                        tl: { col: 6, row: rowNum - 1 },  // 0-based: 第7列, 第rowNum行
-                        br: { col: 7, row: rowNum },      // 到第8列, 第rowNum+1行
+                        tl: { col: 6, row: imgRow0 },
+                        br: { col: 7, row: imgRow0 + 1 },
                         editAs: 'oneCell'
                     });
                 } catch (e) {
-                    worksheet.getCell(rowNum, 7).value = '[图片]';
+                    row.getCell(7).value = '[图片]';
                 }
             }
         }
