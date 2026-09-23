@@ -133,44 +133,57 @@ function resetForm() {
     applyFieldMemory();
 }
 
-// ===== 填入信息记忆（批量录入场景） =====
-// 保存高频字段值到记忆库
+// ===== 填入信息记忆（批量录入场景：记住所有非图片字段） =====
+// 保存所有字段值（除图片、SN、数量外全部记忆）
 function saveFieldMemory(device) {
-    const keys = ['manufacturer', 'type', 'status', 'unit', 'location'];
+    // 要记忆的字段：厂家/类型/名称/型号/状态/单位/备注/出库记录
+    // 不记：图片(snPhoto/frontPhoto)、SN码(sn每次不同)、数量(每次不同)、位置(固定值)、时间
+    const keys = [
+        'manufacturer', 'type', 'name', 'model',
+        'status', 'unit', 'remark', 'outbound'
+    ];
     let memory = {};
     try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
 
     keys.forEach(k => {
         const val = device[k];
-        if (val && String(val).trim()) {
+        if (val !== undefined && val !== null && String(val).trim()) {
             const arr = memory[k] || [];
-            // 去重 + 放到最前面 + 限20个
-            const newArr = [val, ...arr.filter(x => x !== val)].slice(0, 20);
+            const newArr = [String(val), ...arr.filter(x => x !== String(val))].slice(0, 20);
             memory[k] = newArr;
         }
     });
     localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
 }
 
-// 从记忆库自动回填表单 + 更新 datalist 联想
+// 从记忆库自动回填全部字段 + 更新 datalist 联想
 function applyFieldMemory() {
     let memory = {};
     try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
 
-    // 回填单个值（每个字段取最近一次）
-    if (memory.manufacturer && memory.manufacturer[0])
-        document.getElementById('manufacturer').value = memory.manufacturer[0];
-    if (memory.type && memory.type[0])
-        document.getElementById('type').value = memory.type[0];
-    if (memory.status && memory.status[0])
-        document.getElementById('status').value = memory.status[0];
-    if (memory.unit && memory.unit[0])
-        document.getElementById('unit').value = memory.unit[0];
-    // location 固定值不覆盖
+    // 回填（只回填有记忆且非空的，SN/数量/图片/录入时间永远不回填）
+    const fieldMap = [
+        ['manufacturer', 'manufacturer'],
+        ['type',         'type'],
+        ['name',         'name'],
+        ['model',        'model'],
+        ['status',       'status'],
+        ['unit',         'unit'],
+        ['remark',       'remark'],
+        ['outbound',     'outbound']
+    ];
+    fieldMap.forEach(([memKey, domId]) => {
+        if (memory[memKey] && memory[memKey][0]) {
+            document.getElementById(domId).value = memory[memKey][0];
+        }
+    });
+    // location 固定值，不覆盖
 
-    // 填充联想 datalist（所有历史值）
+    // 填充联想 datalist（有历史值的字段都加上）
     fillDatalist('datalist-manufacturer', memory.manufacturer || []);
     fillDatalist('datalist-type',         memory.type         || []);
+    fillDatalist('datalist-name',         memory.name         || []);
+    fillDatalist('datalist-model',        memory.model        || []);
     fillDatalist('datalist-status',       memory.status       || []);
 }
 
@@ -183,12 +196,11 @@ function fillDatalist(id, values) {
 // 手动刷新联想（从现有设备数据提取）
 function refreshDatalistsFromDevices() {
     const devices = getDevices();
-    const mfrs = [...new Set(devices.map(d => d.manufacturer).filter(Boolean))];
-    const types = [...new Set(devices.map(d => d.type).filter(Boolean))];
-    const status = [...new Set(devices.map(d => d.status).filter(Boolean))];
-    fillDatalist('datalist-manufacturer', mfrs);
-    fillDatalist('datalist-type',         types);
-    fillDatalist('datalist-status',       status);
+    fillDatalist('datalist-manufacturer', [...new Set(devices.map(d => d.manufacturer).filter(Boolean))]);
+    fillDatalist('datalist-type',         [...new Set(devices.map(d => d.type).filter(Boolean))]);
+    fillDatalist('datalist-name',         [...new Set(devices.map(d => d.name).filter(Boolean))]);
+    fillDatalist('datalist-model',        [...new Set(devices.map(d => d.model).filter(Boolean))]);
+    fillDatalist('datalist-status',       [...new Set(devices.map(d => d.status).filter(Boolean))]);
 }
 
 // ===== 草稿自动保存（防抖，300ms） =====

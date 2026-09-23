@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <link rel="shortcut icon" href="icons/icon-192.png">
     <title>仓库设备管理系统</title>
-    <link rel="stylesheet" href="style.css?v=2.2">
+    <link rel="stylesheet" href="style.css?v=2.3">
     <!-- Html5Qrcode 条形码扫描库 -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <!-- ZXing 条码识别引擎（双重保障，对CODE128更准） -->
@@ -36,7 +36,7 @@
     <!-- 顶部导航栏 -->
     <header class="app-header">
         <h1>仓库设备管理系统</h1>
-        <span class="version-tag" onclick="checkUpdate()">v2.2</span>
+        <span class="version-tag" onclick="checkUpdate()">v2.3</span>
     </header>
 
     <!-- 底部导航 -->
@@ -121,6 +121,8 @@
                 <!-- 联想数据列表（由JS动态填充） -->
                 <datalist id="datalist-manufacturer"></datalist>
                 <datalist id="datalist-type"></datalist>
+                <datalist id="datalist-name"></datalist>
+                <datalist id="datalist-model"></datalist>
                 <datalist id="datalist-status"></datalist>
 
                 <div class="form-group">
@@ -135,12 +137,12 @@
 
                 <div class="form-group">
                     <label>设备/备件名称 <span class="required">*</span></label>
-                    <input type="text" id="name" placeholder="请输入名称" required>
+                    <input type="text" id="name" list="datalist-name" placeholder="请输入名称" required>
                 </div>
 
                 <div class="form-group">
                     <label>设备/备件型号</label>
-                    <input type="text" id="model" placeholder="请输入型号">
+                    <input type="text" id="model" list="datalist-model" placeholder="请输入型号">
                 </div>
 
                 <div class="form-group">
@@ -327,6 +329,6 @@
     <!-- Toast提示 -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=2.2"></script>
+    <script src="app.js?v=2.3"></script>
 </body>
 </html>
