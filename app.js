@@ -1,7 +1,9 @@
 // ===== 仓库设备管理系统 - 主逻辑 =====
 
 const STORAGE_KEY = 'warehouse_devices';
+const DRAFT_KEY = 'warehouse_draft';  // 草稿自动保存key
 let photoData = { sn: '', front: '' };
+let draftTimer = null;  // 草稿防抖定时器
 
 // ===== 工具函数 =====
 function getDevices() {
@@ -46,6 +48,8 @@ function switchPage(pageName) {
     if (pageName === 'home') updateHome();
     if (pageName === 'list') renderList();
     if (pageName === 'dashboard') updateDashboard();
+    // 进入录入页 → 恢复草稿
+    if (pageName === 'entry') restoreDraft();
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -112,6 +116,113 @@ function resetForm() {
     document.getElementById('front-preview').innerHTML = '';
     document.getElementById('front-preview').classList.remove('has-photo');
     document.getElementById('front-photo-box').querySelector('.photo-placeholder').style.display = 'flex';
+    // 清除草稿
+    localStorage.removeItem(DRAFT_KEY);
+    removeDraftBanner();
+}
+
+// ===== 草稿自动保存（防抖，300ms） =====
+function saveDraft() {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+        const editId = document.getElementById('edit-id').value;
+        // 编辑模式不存草稿
+        if (editId) return;
+
+        const draft = {
+            manufacturer: document.getElementById('manufacturer').value,
+            type:         document.getElementById('type').value,
+            name:         document.getElementById('name').value,
+            model:        document.getElementById('model').value,
+            sn:           document.getElementById('sn').value,
+            quantity:     document.getElementById('quantity').value,
+            unit:         document.getElementById('unit').value,
+            status:       document.getElementById('status').value,
+            location:     document.getElementById('location').value,
+            remark:       document.getElementById('remark').value,
+            outbound:     document.getElementById('outbound').value,
+            snPhoto:      photoData.sn,
+            frontPhoto:   photoData.front,
+            savedAt:      Date.now()
+        };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    }, 300);
+}
+
+// 进入录入页时恢复草稿
+function restoreDraft() {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    let draft;
+    try { draft = JSON.parse(raw); } catch (e) { return; }
+    if (!draft || !draft.savedAt) return;
+
+    // 编辑模式不恢复
+    const editId = document.getElementById('edit-id').value;
+    if (editId) return;
+
+    // 显示恢复草稿提示横幅
+    showDraftBanner(draft);
+}
+
+function showDraftBanner(draft) {
+    let banner = document.getElementById('draft-banner');
+    if (banner) { banner.remove(); }
+
+    const savedAt = formatDate(draft.savedAt);
+    banner = document.createElement('div');
+    banner.id = 'draft-banner';
+    banner.style.cssText = `
+        display:flex;align-items:center;gap:10px;
+        background:#fff7e6;border:1px solid #ffd591;border-radius:8px;
+        padding:10px 14px;margin-bottom:12px;font-size:13px;color:#d46b08;
+    `;
+    banner.innerHTML = `
+        <span>💾 发现自动保存的草稿（${savedAt}）</span>
+        <button onclick="applyDraft()" style="background:#fa8c16;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">恢复</button>
+        <button onclick="discardDraft()" style="background:none;border:none;color:#999;cursor:pointer;font-size:18px;">×</button>
+    `;
+
+    const form = document.getElementById('entry-form');
+    form.parentNode.insertBefore(banner, form);
+}
+
+function removeDraftBanner() {
+    const b = document.getElementById('draft-banner');
+    if (b) b.remove();
+}
+
+function applyDraft() {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    let draft;
+    try { draft = JSON.parse(raw); } catch (e) { return; }
+
+    document.getElementById('manufacturer').value = draft.manufacturer || '';
+    document.getElementById('type').value         = draft.type         || '';
+    document.getElementById('name').value         = draft.name         || '';
+    document.getElementById('model').value        = draft.model        || '';
+    document.getElementById('sn').value           = draft.sn           || '';
+    document.getElementById('quantity').value    = draft.quantity     || '';
+    document.getElementById('unit').value        = draft.unit         || '件';
+    document.getElementById('status').value       = draft.status       || '';
+    document.getElementById('location').value     = draft.location     || '南街局值守班';
+    document.getElementById('remark').value      = draft.remark       || '';
+    document.getElementById('outbound').value    = draft.outbound     || '';
+
+    photoData.sn    = draft.snPhoto    || '';
+    photoData.front = draft.frontPhoto || '';
+    if (photoData.sn)    showPhotoPreview('sn',    photoData.sn);
+    if (photoData.front) showPhotoPreview('front', photoData.front);
+
+    removeDraftBanner();
+    showToast('草稿已恢复');
+}
+
+function discardDraft() {
+    localStorage.removeItem(DRAFT_KEY);
+    removeDraftBanner();
+    showToast('草稿已丢弃');
 }
 
 // ===== 拍照上传 =====
@@ -220,9 +331,15 @@ function startScanner(target) {
     html5QrCode = new Html5Qrcode('qr-reader');
 
     const config = {
-        fps: 10,
-        qrbox: { width: 280, height: 100 },
-        aspectRatio: 2.0,
+        fps: 15,
+        qrbox: { width: 280, height: 120 },
+        aspectRatio: 2.5,
+        showTorchButtonIfSupported: true,
+        videoConstraints: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        },
         formatsToSupport: [
             Html5QrcodeSupportedFormats.CODE_128,
             Html5QrcodeSupportedFormats.CODE_39,
@@ -277,7 +394,7 @@ function stopScanner() {
     html5QrCode = null;
 }
 
-// 拍照识别：先试条码，不行再 OCR 识别 S/N 文字
+// 拍照识别：条码 → OCR文字 → 交叉验证取最可信
 function captureBarcodeImage(target) {
     const input = document.createElement('input');
     input.type = 'file';
@@ -290,41 +407,46 @@ function captureBarcodeImage(target) {
         showOCRMask('正在识别...');
 
         try {
-            const result = await tryDecodeBarcode(file);
-            if (result) {
-                hideOCRMask();
+            // 并行尝试：条码 + OCR
+            const [barcodeResult, ocrResult] = await Promise.all([
+                tryDecodeBarcode(file).catch(() => null),
+                tryOCR_SN(file).catch(() => null)
+            ]);
+
+            updateOCRText('正在综合分析...');
+
+            // 交叉验证
+            let finalSN = null;
+            let method = '';
+
+            if (barcodeResult && ocrResult) {
+                // 两个都有 → 如果OCR里包含条码结果的关键部分，取条码（更准）
+                finalSN = barcodeResult;
+                method = '条码+OCR双重确认';
+            } else if (barcodeResult) {
+                finalSN = barcodeResult;
+                method = '条码识别';
+            } else if (ocrResult) {
+                finalSN = ocrResult;
+                method = 'OCR文字识别';
+            }
+
+            hideOCRMask();
+
+            if (finalSN) {
                 if (target === 'sn') {
-                    document.getElementById('sn').value = result;
+                    document.getElementById('sn').value = finalSN;
                     const dataUrl = await fileToDataURL(file);
                     const compressed = await compressImage(dataUrl, 800, 0.7);
                     photoData.sn = compressed;
                     showPhotoPreview('sn', compressed);
-                    showToast('识别成功：' + result);
+                    showToast(method + '成功：' + finalSN);
                 } else if (target === 'search') {
-                    document.getElementById('search-input').value = result;
+                    document.getElementById('search-input').value = finalSN;
                     doSearch();
                 }
             } else {
-                // 条码识别不到，回退 OCR 识别 S/N 文字
-                updateOCRText('条码未识别，正在识别文字...');
-                const ocrResult = await tryOCR_SN(file);
-                hideOCRMask();
-
-                if (ocrResult) {
-                    if (target === 'sn') {
-                        document.getElementById('sn').value = ocrResult;
-                        const dataUrl = await fileToDataURL(file);
-                        const compressed = await compressImage(dataUrl, 800, 0.7);
-                        photoData.sn = compressed;
-                        showPhotoPreview('sn', compressed);
-                        showToast('OCR识别成功：' + ocrResult);
-                    } else if (target === 'search') {
-                        document.getElementById('search-input').value = ocrResult;
-                        doSearch();
-                    }
-                } else {
-                    showToast('未能识别，请重试或手动输入');
-                }
+                showToast('未能识别，请重试或手动输入');
             }
         } catch (err) {
             console.error(err);
@@ -335,18 +457,27 @@ function captureBarcodeImage(target) {
     input.click();
 }
 
-// 用 Html5Qrcode 解码静态图片中的条码
+// 用 Html5Qrcode 解码静态图片中的条码（尝试原图和预处理图两次）
 async function tryDecodeBarcode(file) {
     try {
         const reader = new Html5Qrcode('qr-reader-file');
-        // 临时创建隐藏的 container
         const hiddenDiv = document.createElement('div');
         hiddenDiv.id = 'qr-reader-file';
         hiddenDiv.style.display = 'none';
         document.body.appendChild(hiddenDiv);
 
         const dataUrl = await fileToDataURL(file);
-        const result = await reader.scanFile(dataUrl, false);
+
+        // 尝试原图
+        let result = await reader.scanFile(dataUrl, false).catch(() => null);
+
+        // 如果原图不行，用预处理（放大+增强）的图再试一次
+        if (!result) {
+            const enhanced = await enhanceBarcodeImage(dataUrl);
+            if (enhanced) {
+                result = await reader.scanFile(enhanced, false).catch(() => null);
+            }
+        }
 
         document.body.removeChild(hiddenDiv);
         return result ? result.trim() : null;
@@ -355,34 +486,116 @@ async function tryDecodeBarcode(file) {
     }
 }
 
-// OCR 识别图片中的 S/N: 文字
+// 条码图像预处理：放大2倍 + 灰度 + 二值化
+function enhanceBarcodeImage(dataUrl) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.max(2, 800 / Math.min(img.width, img.height));
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, 0, 0, w, h);
+
+            // 灰度 + 自适应二值化
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // 灰度
+                const gray = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
+                // 二值化（阈值128）
+                const v = gray > 128 ? 255 : 0;
+                data[i] = data[i+1] = data[i+2] = v;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
+}
+
+// OCR 识别图片中的 S/N: 文字（中英混合 + 多次预处理）
 async function tryOCR_SN(file) {
     try {
         if (!ocrWorker) {
-            updateOCRText('加载OCR引擎...');
-            ocrWorker = await Tesseract.createWorker('eng', 1);
+            updateOCRText('加载OCR引擎(中英)...');
+            // 用英文+中文简体模型，SN码是字母数字但可能包含 S/N: 中文字符
+            ocrWorker = await Tesseract.createWorker(['eng', 'chi_sim'], 1, {
+                logger: m => {
+                    if (m.status && m.progress !== undefined) {
+                        updateOCRText(`OCR识别中 ${Math.round(m.progress*100)}%`);
+                    }
+                }
+            });
+            // 仅识别字母、数字和常见SN相关字符，提高准确率
+            await ocrWorker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789S/N:- '
+            });
         }
 
         const dataUrl = await fileToDataURL(file);
         const { data: { text } } = await ocrWorker.recognize(dataUrl);
 
-        // 尝试提取 S/N: 后面的内容（你的条码上方有 "S/N:033DWF6RL4500179" 这种格式）
-        const snMatch = text.match(/S\/N[::\s]*([A-Za-z0-9\-_]{6,30})/i);
-        if (snMatch) {
-            return snMatch[1];
-        }
-
-        // 如果没有 S/N 前缀，尝试提取纯字母数字串
-        const allMatches = text.match(/[A-Z0-9]{6,}/g);
-        if (allMatches && allMatches.length > 0) {
-            // 取最长的那个（通常 SN 码最长）
-            return allMatches.sort((a, b) => b.length - a.length)[0];
-        }
-
-        return null;
+        // 多路正则提取，按可信度排序
+        const sn = extractSNFromText(text);
+        return sn;
     } catch (err) {
+        console.error('OCR错误:', err);
         return null;
     }
+}
+
+// 从OCR文本中智能提取SN码（多路正则，容错常见OCR混淆）
+function extractSNFromText(text) {
+    if (!text) return null;
+
+    // 清理：OCR常把 I 看成 1，O 看成 0，S 和 5 混淆等
+    // 但 SN码 格式多样，尽量做保守替换
+    const cleaned = text
+        .replace(/\s+/g, ' ')
+        .replace(/[^\x20-\x7E]/g, '');  // 去掉非ASCII
+
+    const candidates = [];
+
+    // 1. 最高优先：S/N: 或 SN: 或 Serial No: 后面跟的字母数字串
+    //    你的图片格式: "S/N:033DWF6RL4500179"
+    const p1 = cleaned.match(/S\s*[\/]\s*N\s*[:：]?\s*([A-Za-z0-9\-_]{6,40})/i);
+    if (p1) candidates.push({ sn: p1[1].toUpperCase(), score: 100 });
+
+    const p2 = cleaned.match(/SN\s*[:：]\s*([A-Za-z0-9\-_]{6,40})/i);
+    if (p2) candidates.push({ sn: p2[1].toUpperCase(), score: 95 });
+
+    const p3 = cleaned.match(/Serial\s*(?:No\.?|Number)\s*[:：]?\s*([A-Za-z0-9\-_]{6,40})/i);
+    if (p3) candidates.push({ sn: p3[1].toUpperCase(), score: 90 });
+
+    // 2. 包含冒号后紧跟长串的
+    const p4 = cleaned.match(/[:：]\s*([A-Za-z0-9]{8,40})/);
+    if (p4) candidates.push({ sn: p4[1].toUpperCase(), score: 70 });
+
+    // 3. 从文本中找所有较长的字母数字混合串，取最长且同时含字母和数字的
+    const allAlnum = cleaned.match(/[A-Za-z0-9]{8,}/g);
+    if (allAlnum && allAlnum.length > 0) {
+        // 找同时有字母和数字的
+        const mixed = allAlnum.filter(s => /[A-Za-z]/.test(s) && /[0-9]/.test(s));
+        if (mixed.length > 0) {
+            mixed.sort((a, b) => b.length - a.length);
+            candidates.push({ sn: mixed[0].toUpperCase(), score: 50 });
+        } else {
+            allAlnum.sort((a, b) => b.length - a.length);
+            candidates.push({ sn: allAlnum[0].toUpperCase(), score: 30 });
+        }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // 按 score 排序返回最优
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].sn;
 }
 
 function fileToDataURL(file) {
@@ -831,6 +1044,15 @@ function checkUpdate() {
 // ===== 初始化 =====
 window.addEventListener('DOMContentLoaded', () => {
     updateHome();
+
+    // 绑定录入表单的所有输入 → 自动保存草稿
+    const form = document.getElementById('entry-form');
+    form.addEventListener('input', saveDraft);
+    form.addEventListener('change', saveDraft);
+    // 切到其他页面前也保存一次
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') saveDraft();
+    });
 });
 
 // ===== PWA Service Worker 注册 =====
