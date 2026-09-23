@@ -17,9 +17,12 @@
     <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <link rel="shortcut icon" href="icons/icon-192.png">
     <title>仓库设备管理系统</title>
-    <link rel="stylesheet" href="style.css?v=2.1">
-    <!-- Html5Qrcode 条形码扫描库（识别率更高） -->
+    <link rel="stylesheet" href="style.css?v=2.2">
+    <!-- Html5Qrcode 条形码扫描库 -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- ZXing 条码识别引擎（双重保障，对CODE128更准） -->
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.4/dist/zxing-browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/dist/zxing.min.js"></script>
     <!-- Tesseract OCR 备用识别 S/N 文字 -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <!-- ExcelJS 生成带图片的Excel -->
@@ -33,7 +36,7 @@
     <!-- 顶部导航栏 -->
     <header class="app-header">
         <h1>仓库设备管理系统</h1>
-        <span class="version-tag" onclick="checkUpdate()">v2.1</span>
+        <span class="version-tag" onclick="checkUpdate()">v2.2</span>
     </header>
 
     <!-- 底部导航 -->
@@ -115,14 +118,19 @@
             <form id="entry-form" class="entry-form">
                 <input type="hidden" id="edit-id" value="">
 
+                <!-- 联想数据列表（由JS动态填充） -->
+                <datalist id="datalist-manufacturer"></datalist>
+                <datalist id="datalist-type"></datalist>
+                <datalist id="datalist-status"></datalist>
+
                 <div class="form-group">
                     <label>厂家 <span class="required">*</span></label>
-                    <input type="text" id="manufacturer" placeholder="请输入厂家名称" required>
+                    <input type="text" id="manufacturer" list="datalist-manufacturer" placeholder="请输入厂家名称" required>
                 </div>
 
                 <div class="form-group">
                     <label>设备/备件类型 <span class="required">*</span></label>
-                    <input type="text" id="type" placeholder="请输入类型，如：设备、备件、工具等" required>
+                    <input type="text" id="type" list="datalist-type" placeholder="请输入类型，如：设备、备件、工具等" required>
                 </div>
 
                 <div class="form-group">
@@ -319,6 +327,6 @@
     <!-- Toast提示 -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=2.1"></script>
+    <script src="app.js?v=2.2"></script>
 </body>
 </html>

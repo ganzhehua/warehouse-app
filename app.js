@@ -1,9 +1,10 @@
 // ===== 仓库设备管理系统 - 主逻辑 =====
 
 const STORAGE_KEY = 'warehouse_devices';
-const DRAFT_KEY = 'warehouse_draft';  // 草稿自动保存key
+const DRAFT_KEY = 'warehouse_draft';   // 草稿自动保存key
+const MEMORY_KEY = 'warehouse_memory'; // 上次录入值记忆key
 let photoData = { sn: '', front: '' };
-let draftTimer = null;  // 草稿防抖定时器
+let draftTimer = null;                 // 草稿防抖定时器
 
 // ===== 工具函数 =====
 function getDevices() {
@@ -101,6 +102,15 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
     }
 
     saveDevices(devices);
+
+    // 录入成功 → 记住高频字段，下次自动填入
+    if (!editId) {
+        saveFieldMemory(device);
+        showToast('录入成功！已记住厂家/类型/状态');
+    } else {
+        showToast('修改成功！');
+    }
+
     resetForm();
     switchPage('home');
 });
@@ -119,6 +129,66 @@ function resetForm() {
     // 清除草稿
     localStorage.removeItem(DRAFT_KEY);
     removeDraftBanner();
+    // 用上次记住的值回填（方便批量录入）
+    applyFieldMemory();
+}
+
+// ===== 填入信息记忆（批量录入场景） =====
+// 保存高频字段值到记忆库
+function saveFieldMemory(device) {
+    const keys = ['manufacturer', 'type', 'status', 'unit', 'location'];
+    let memory = {};
+    try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
+
+    keys.forEach(k => {
+        const val = device[k];
+        if (val && String(val).trim()) {
+            const arr = memory[k] || [];
+            // 去重 + 放到最前面 + 限20个
+            const newArr = [val, ...arr.filter(x => x !== val)].slice(0, 20);
+            memory[k] = newArr;
+        }
+    });
+    localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
+}
+
+// 从记忆库自动回填表单 + 更新 datalist 联想
+function applyFieldMemory() {
+    let memory = {};
+    try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
+
+    // 回填单个值（每个字段取最近一次）
+    if (memory.manufacturer && memory.manufacturer[0])
+        document.getElementById('manufacturer').value = memory.manufacturer[0];
+    if (memory.type && memory.type[0])
+        document.getElementById('type').value = memory.type[0];
+    if (memory.status && memory.status[0])
+        document.getElementById('status').value = memory.status[0];
+    if (memory.unit && memory.unit[0])
+        document.getElementById('unit').value = memory.unit[0];
+    // location 固定值不覆盖
+
+    // 填充联想 datalist（所有历史值）
+    fillDatalist('datalist-manufacturer', memory.manufacturer || []);
+    fillDatalist('datalist-type',         memory.type         || []);
+    fillDatalist('datalist-status',       memory.status       || []);
+}
+
+function fillDatalist(id, values) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = values.map(v => `<option value="${v}"></option>`).join('');
+}
+
+// 手动刷新联想（从现有设备数据提取）
+function refreshDatalistsFromDevices() {
+    const devices = getDevices();
+    const mfrs = [...new Set(devices.map(d => d.manufacturer).filter(Boolean))];
+    const types = [...new Set(devices.map(d => d.type).filter(Boolean))];
+    const status = [...new Set(devices.map(d => d.status).filter(Boolean))];
+    fillDatalist('datalist-manufacturer', mfrs);
+    fillDatalist('datalist-type',         types);
+    fillDatalist('datalist-status',       status);
 }
 
 // ===== 草稿自动保存（防抖，300ms） =====
@@ -404,25 +474,39 @@ function captureBarcodeImage(target) {
         const file = e.target.files[0];
         if (!file) return;
 
-        showOCRMask('正在识别...');
+        showOCRMask('正在识别条码...');
 
         try {
-            // 并行尝试：条码 + OCR
+            // 并行尝试：双引擎条码解码 + OCR
             const [barcodeResult, ocrResult] = await Promise.all([
                 tryDecodeBarcode(file).catch(() => null),
                 tryOCR_SN(file).catch(() => null)
             ]);
 
-            updateOCRText('正在综合分析...');
+            updateOCRText('综合分析结果...');
 
-            // 交叉验证
+            // 智能评分选最优
             let finalSN = null;
             let method = '';
 
             if (barcodeResult && ocrResult) {
-                // 两个都有 → 如果OCR里包含条码结果的关键部分，取条码（更准）
-                finalSN = barcodeResult;
-                method = '条码+OCR双重确认';
+                const b = barcodeResult.toUpperCase();
+                const o = ocrResult.toUpperCase();
+                // 完全一致 → 双引擎确认
+                if (b === o) {
+                    finalSN = b;
+                    method = '条码+OCR双重确认';
+                }
+                // 其中一个包含另一个
+                else if (b.includes(o) || o.includes(b)) {
+                    finalSN = b.length >= o.length ? b : o;
+                    method = '综合识别';
+                }
+                // 不一致 → 条码优先（条码引擎比OCR更准）
+                else {
+                    finalSN = b;
+                    method = '条码识别(与OCR不一致)';
+                }
             } else if (barcodeResult) {
                 finalSN = barcodeResult;
                 method = '条码识别';
@@ -434,13 +518,20 @@ function captureBarcodeImage(target) {
             hideOCRMask();
 
             if (finalSN) {
+                // 格式清理：只保留大写字母和数字
+                finalSN = finalSN.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                if (finalSN.length < 3) {
+                    showToast('识别结果太短，请重试');
+                    return;
+                }
+
                 if (target === 'sn') {
                     document.getElementById('sn').value = finalSN;
                     const dataUrl = await fileToDataURL(file);
                     const compressed = await compressImage(dataUrl, 800, 0.7);
                     photoData.sn = compressed;
                     showPhotoPreview('sn', compressed);
-                    showToast(method + '成功：' + finalSN);
+                    showToast(method + '：' + finalSN);
                 } else if (target === 'search') {
                     document.getElementById('search-input').value = finalSN;
                     doSearch();
@@ -457,33 +548,85 @@ function captureBarcodeImage(target) {
     input.click();
 }
 
-// 用 Html5Qrcode 解码静态图片中的条码（尝试原图和预处理图两次）
-async function tryDecodeBarcode(file) {
+// ===== 条码识别：ZXing + Html5Qrcode 双引擎并行 =====
+// 尝试用 ZXing 引擎解码（对 CODE128/CODE39 更精准）
+async function tryZXingBarcode(dataUrl) {
     try {
-        const reader = new Html5Qrcode('qr-reader-file');
-        const hiddenDiv = document.createElement('div');
-        hiddenDiv.id = 'qr-reader-file';
-        hiddenDiv.style.display = 'none';
-        document.body.appendChild(hiddenDiv);
+        if (!window.ZXing || !ZXing.BrowserMultiFormatReader) return null;
+        const reader = new ZXing.BrowserMultiFormatReader();
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+            img.onload = resolve; img.onerror = reject; img.src = dataUrl;
+        });
+        const result = await reader.decodeFromImageElement(img);
+        return result ? result.text.trim() : null;
+    } catch (e) { return null; }
+}
 
-        const dataUrl = await fileToDataURL(file);
-
-        // 尝试原图
-        let result = await reader.scanFile(dataUrl, false).catch(() => null);
-
-        // 如果原图不行，用预处理（放大+增强）的图再试一次
-        if (!result) {
-            const enhanced = await enhanceBarcodeImage(dataUrl);
-            if (enhanced) {
-                result = await reader.scanFile(enhanced, false).catch(() => null);
-            }
-        }
-
-        document.body.removeChild(hiddenDiv);
+// 尝试用 Html5Qrcode 解码
+async function tryHtml5QrBarcode(dataUrl) {
+    try {
+        const container = document.createElement('div');
+        container.id = 'qr-temp-' + Date.now();
+        container.style.display = 'none';
+        document.body.appendChild(container);
+        const reader = new Html5Qrcode(container.id);
+        const result = await reader.scanFile(dataUrl, false).catch(() => null);
+        document.body.removeChild(container);
         return result ? result.trim() : null;
-    } catch (err) {
-        return null;
+    } catch (e) { return null; }
+}
+
+// 用多个方向 + 两个引擎并行尝试
+async function tryDecodeBarcode(file) {
+    const dataUrl = await fileToDataURL(file);
+
+    // 生成多个方向的图：原图 + 增强 + 旋转90° + 旋转180°
+    const variants = await Promise.all([
+        Promise.resolve(dataUrl),                 // 原图
+        enhanceBarcodeImage(dataUrl),              // 放大增强
+        rotateImage(dataUrl, 90).catch(() => null),
+        rotateImage(dataUrl, 180).catch(() => null),
+    ]);
+
+    const tasks = [];
+    for (const v of variants) {
+        if (!v) continue;
+        tasks.push(tryZXingBarcode(v));
+        tasks.push(tryHtml5QrBarcode(v));
     }
+
+    // 并行跑所有，取第一个非null的结果
+    const results = await Promise.all(tasks);
+    const valid = results.filter(r => r);
+    if (valid.length === 0) return null;
+
+    // 去重，取最长的（最长通常是最完整的）
+    const unique = [...new Set(valid)];
+    unique.sort((a, b) => b.length - a.length);
+    return unique[0];
+}
+
+// 图像旋转
+function rotateImage(dataUrl, degrees) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const rad = degrees * Math.PI / 180;
+            const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+            const w = img.width * cos + img.height * sin;
+            const h = img.width * sin + img.height * cos;
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.translate(w/2, h/2);
+            ctx.rotate(rad);
+            ctx.drawImage(img, -img.width/2, -img.height/2);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = dataUrl;
+    });
 }
 
 // 条码图像预处理：放大2倍 + 灰度 + 二值化
@@ -1053,6 +1196,11 @@ window.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') saveDraft();
     });
+
+    // 初始化联想列表（从已有数据 + 记忆值）
+    refreshDatalistsFromDevices();
+    // 同时用记忆值（最新录入的排前面）
+    applyFieldMemory();
 });
 
 // ===== PWA Service Worker 注册 =====
