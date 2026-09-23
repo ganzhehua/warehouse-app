@@ -133,21 +133,20 @@ function resetForm() {
     applyFieldMemory();
 }
 
-// ===== 填入信息记忆（批量录入场景：记住所有非图片字段） =====
-// 保存所有字段值（除图片、SN、数量外全部记忆）
+// ===== 填入信息记忆（记住全部非图片字段） =====
 function saveFieldMemory(device) {
-    // 要记忆的字段：厂家/类型/名称/型号/状态/单位/备注/出库记录
-    // 不记：图片(snPhoto/frontPhoto)、SN码(sn每次不同)、数量(每次不同)、位置(固定值)、时间
+    // 记忆全部字段，只排除：图片(snPhoto/frontPhoto)、录入时间、位置(固定值)
     const keys = [
         'manufacturer', 'type', 'name', 'model',
-        'status', 'unit', 'remark', 'outbound'
+        'sn', 'quantity', 'status', 'unit',
+        'remark', 'outbound'
     ];
     let memory = {};
     try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
 
     keys.forEach(k => {
         const val = device[k];
-        if (val !== undefined && val !== null && String(val).trim()) {
+        if (val !== undefined && val !== null && String(val).trim() && String(val) !== '0') {
             const arr = memory[k] || [];
             const newArr = [String(val), ...arr.filter(x => x !== String(val))].slice(0, 20);
             memory[k] = newArr;
@@ -156,17 +155,19 @@ function saveFieldMemory(device) {
     localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
 }
 
-// 从记忆库自动回填全部字段 + 更新 datalist 联想
+// 从记忆库自动回填全部字段
 function applyFieldMemory() {
     let memory = {};
     try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY)) || {}; } catch(e) {}
 
-    // 回填（只回填有记忆且非空的，SN/数量/图片/录入时间永远不回填）
+    // 回填所有记忆字段（图片/时间/位置不回填）
     const fieldMap = [
         ['manufacturer', 'manufacturer'],
         ['type',         'type'],
         ['name',         'name'],
         ['model',        'model'],
+        ['sn',           'sn'],
+        ['quantity',     'quantity'],
         ['status',       'status'],
         ['unit',         'unit'],
         ['remark',       'remark'],
@@ -177,7 +178,6 @@ function applyFieldMemory() {
             document.getElementById(domId).value = memory[memKey][0];
         }
     });
-    // location 固定值，不覆盖
 
     // 填充联想 datalist（有历史值的字段都加上）
     fillDatalist('datalist-manufacturer', memory.manufacturer || []);
