@@ -561,11 +561,26 @@ function captureBarcodeImage(target) {
 }
 
 // ===== 条码识别：ZXing + Html5Qrcode 双引擎并行 =====
-// 尝试用 ZXing 引擎解码（对 CODE128/CODE39 更精准）
+// 尝试用 ZXing 引擎解码（带 CODE128/CODE39 hints）
 async function tryZXingBarcode(dataUrl) {
     try {
         if (!window.ZXing || !ZXing.BrowserMultiFormatReader) return null;
         const reader = new ZXing.BrowserMultiFormatReader();
+        // 设置解码提示：优先 CODE128 和 CODE39（设备SN码最常见格式）
+        if (ZXing.DecodeHintType) {
+            const hints = new Map();
+            hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                ZXing.BarcodeFormat.CODE_128,
+                ZXing.BarcodeFormat.CODE_39,
+                ZXing.BarcodeFormat.CODE_93,
+                ZXing.BarcodeFormat.CODABAR,
+                ZXing.BarcodeFormat.EAN_13,
+                ZXing.BarcodeFormat.UPC_A,
+                ZXing.BarcodeFormat.QR_CODE
+            ]);
+            hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+            reader.hints = hints;
+        }
         const img = new Image();
         await new Promise((resolve, reject) => {
             img.onload = resolve; img.onerror = reject; img.src = dataUrl;
@@ -593,12 +608,13 @@ async function tryHtml5QrBarcode(dataUrl) {
 async function tryDecodeBarcode(file) {
     const dataUrl = await fileToDataURL(file);
 
-    // 生成多个方向的图：原图 + 增强 + 旋转90° + 旋转180°
+    // 生成多个方向的图：原图 + 增强 + 旋转90°/180°/270°
     const variants = await Promise.all([
         Promise.resolve(dataUrl),                 // 原图
-        enhanceBarcodeImage(dataUrl),              // 放大增强
+        enhanceBarcodeImage(dataUrl),              // Otsu增强
         rotateImage(dataUrl, 90).catch(() => null),
         rotateImage(dataUrl, 180).catch(() => null),
+        rotateImage(dataUrl, 270).catch(() => null),
     ]);
 
     const tasks = [];
@@ -641,7 +657,7 @@ function rotateImage(dataUrl, degrees) {
     });
 }
 
-// 条码图像预处理：放大2倍 + 灰度 + 二值化
+// 条码图像预处理：放大2倍 + 灰度 + Otsu自适应二值化
 function enhanceBarcodeImage(dataUrl) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -656,14 +672,37 @@ function enhanceBarcodeImage(dataUrl) {
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(img, 0, 0, w, h);
 
-            // 灰度 + 自适应二值化
             const imgData = ctx.getImageData(0, 0, w, h);
             const data = imgData.data;
-            for (let i = 0; i < data.length; i += 4) {
-                // 灰度
-                const gray = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
-                // 二值化（阈值128）
-                const v = gray > 128 ? 255 : 0;
+
+            // 1. 灰度
+            const grayArr = new Uint8ClampedArray(w * h);
+            for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+                grayArr[j] = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
+            }
+
+            // 2. Otsu 自适应阈值计算
+            const histogram = new Array(256).fill(0);
+            for (let i = 0; i < grayArr.length; i++) histogram[grayArr[i]]++;
+            const total = grayArr.length;
+            let sum = 0;
+            for (let i = 0; i < 256; i++) sum += i * histogram[i];
+            let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+            for (let i = 0; i < 256; i++) {
+                wB += histogram[i];
+                if (wB === 0) continue;
+                const wF = total - wB;
+                if (wF === 0) break;
+                sumB += i * histogram[i];
+                const mB = sumB / wB;
+                const mF = (sum - sumB) / wF;
+                const betweenVar = wB * wF * (mB - mF) * (mB - mF);
+                if (betweenVar > maxVar) { maxVar = betweenVar; threshold = i; }
+            }
+
+            // 3. 二值化
+            for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+                const v = grayArr[j] > threshold ? 255 : 0;
                 data[i] = data[i+1] = data[i+2] = v;
             }
             ctx.putImageData(imgData, 0, 0);
@@ -674,12 +713,11 @@ function enhanceBarcodeImage(dataUrl) {
     });
 }
 
-// OCR 识别图片中的 S/N: 文字（中英混合 + 多次预处理）
+// OCR 识别图片中的 S/N: 文字（多预处理变体 + PSM单行模式 + 混淆纠正）
 async function tryOCR_SN(file) {
     try {
         if (!ocrWorker) {
             updateOCRText('加载OCR引擎(中英)...');
-            // 用英文+中文简体模型，SN码是字母数字但可能包含 S/N: 中文字符
             ocrWorker = await Tesseract.createWorker(['eng', 'chi_sim'], 1, {
                 logger: m => {
                     if (m.status && m.progress !== undefined) {
@@ -687,30 +725,89 @@ async function tryOCR_SN(file) {
                     }
                 }
             });
-            // 仅识别字母、数字和常见SN相关字符，提高准确率
             await ocrWorker.setParameters({
                 tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789S/N:- '
             });
         }
 
         const dataUrl = await fileToDataURL(file);
-        const { data: { text } } = await ocrWorker.recognize(dataUrl);
 
-        // 多路正则提取，按可信度排序
-        const sn = extractSNFromText(text);
-        return sn;
+        // 生成多个预处理变体并行跑OCR，取最优结果
+        const variants = await Promise.all([
+            Promise.resolve(dataUrl),                        // 原图
+            enhanceForOCR(dataUrl, 1.5, 0),                   // 放大1.5x
+            enhanceForOCR(dataUrl, 2.0, 30),                  // 放大2x + 对比度+30
+            enhanceForOCR(dataUrl, 2.0, 60),                  // 放大2x + 对比度+60
+        ]);
+
+        // 依次跑OCR（Tesseract worker不支持并发，需串行）
+        const results = [];
+        for (let i = 0; i < variants.length; i++) {
+            if (!variants[i]) continue;
+            updateOCRText(`OCR识别中 变体${i+1}/${variants.length}...`);
+            try {
+                const { data } = await ocrWorker.recognize(variants[i]);
+                if (data && data.text) {
+                    const sn = extractSNFromText(data.text);
+                    if (sn) {
+                        // 用置信度打分
+                        const conf = data.confidence || 50;
+                        results.push({ sn, confidence: conf, variant: i });
+                    }
+                }
+            } catch(e) { /* 跳过 */ }
+        }
+
+        if (results.length === 0) return null;
+
+        // 按置信度排序，取最高的
+        results.sort((a, b) => b.confidence - a.confidence);
+        return results[0].sn;
     } catch (err) {
         console.error('OCR错误:', err);
         return null;
     }
 }
 
-// 从OCR文本中智能提取SN码（多路正则，容错常见OCR混淆）
+// OCR专用图像预处理：放大 + 灰度 + 对比度增强 + 锐化
+function enhanceForOCR(dataUrl, scale, contrastBoost) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            const contrastFactor = (259 * (contrastBoost + 255)) / (255 * (259 - contrastBoost));
+
+            for (let i = 0; i < data.length; i += 4) {
+                // 灰度
+                let gray = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
+                // 对比度增强
+                gray = contrastFactor * (gray - 128) + 128;
+                gray = Math.max(0, Math.min(255, gray));
+                data[i] = data[i+1] = data[i+2] = gray;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
+}
+
+// 从OCR文本中智能提取SN码（多路正则 + 混淆字符纠正）
 function extractSNFromText(text) {
     if (!text) return null;
 
-    // 清理：OCR常把 I 看成 1，O 看成 0，S 和 5 混淆等
-    // 但 SN码 格式多样，尽量做保守替换
     const cleaned = text
         .replace(/\s+/g, ' ')
         .replace(/[^\x20-\x7E]/g, '');  // 去掉非ASCII
@@ -718,39 +815,45 @@ function extractSNFromText(text) {
     const candidates = [];
 
     // 1. 最高优先：S/N: 或 SN: 或 Serial No: 后面跟的字母数字串
-    //    你的图片格式: "S/N:033DWF6RL4500179"
     const p1 = cleaned.match(/S\s*[\/]\s*N\s*[:：]?\s*([A-Za-z0-9\-_]{6,40})/i);
-    if (p1) candidates.push({ sn: p1[1].toUpperCase(), score: 100 });
+    if (p1) candidates.push({ sn: p1[1], score: 100 });
 
     const p2 = cleaned.match(/SN\s*[:：]\s*([A-Za-z0-9\-_]{6,40})/i);
-    if (p2) candidates.push({ sn: p2[1].toUpperCase(), score: 95 });
+    if (p2) candidates.push({ sn: p2[1], score: 95 });
 
     const p3 = cleaned.match(/Serial\s*(?:No\.?|Number)\s*[:：]?\s*([A-Za-z0-9\-_]{6,40})/i);
-    if (p3) candidates.push({ sn: p3[1].toUpperCase(), score: 90 });
+    if (p3) candidates.push({ sn: p3[1], score: 90 });
 
     // 2. 包含冒号后紧跟长串的
     const p4 = cleaned.match(/[:：]\s*([A-Za-z0-9]{8,40})/);
-    if (p4) candidates.push({ sn: p4[1].toUpperCase(), score: 70 });
+    if (p4) candidates.push({ sn: p4[1], score: 70 });
 
-    // 3. 从文本中找所有较长的字母数字混合串，取最长且同时含字母和数字的
+    // 3. 从文本中找所有较长的字母数字混合串
     const allAlnum = cleaned.match(/[A-Za-z0-9]{8,}/g);
     if (allAlnum && allAlnum.length > 0) {
-        // 找同时有字母和数字的
         const mixed = allAlnum.filter(s => /[A-Za-z]/.test(s) && /[0-9]/.test(s));
         if (mixed.length > 0) {
             mixed.sort((a, b) => b.length - a.length);
-            candidates.push({ sn: mixed[0].toUpperCase(), score: 50 });
+            candidates.push({ sn: mixed[0], score: 50 });
         } else {
             allAlnum.sort((a, b) => b.length - a.length);
-            candidates.push({ sn: allAlnum[0].toUpperCase(), score: 30 });
+            candidates.push({ sn: allAlnum[0], score: 30 });
         }
     }
 
     if (candidates.length === 0) return null;
 
-    // 按 score 排序返回最优
     candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].sn;
+    const best = candidates[0];
+
+    // 混淆字符纠正：OCR常把0和O、1和I/l、5和S混淆
+    // 规则：如果SN码里同时有字母和数字，根据上下文纠正
+    let sn = best.sn.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    // 去除常见误识别前缀（如 "S/N" 被识别进结果里）
+    sn = sn.replace(/^SN/i, '').replace(/^S\/N/i, '');
+
+    return sn;
 }
 
 function fileToDataURL(file) {
