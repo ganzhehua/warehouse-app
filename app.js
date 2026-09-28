@@ -601,6 +601,7 @@ function captureBarcodeImage(target) {
     input.onchange = async function (e) {
         const file = e.target.files[0];
         if (!file) return;
+        scanCancelled = false;
 
         showOCRMask('正在识别条码...');
 
@@ -610,6 +611,9 @@ function captureBarcodeImage(target) {
                 tryDecodeBarcode(file).catch(() => null),
                 tryOCR_SN(file).catch(() => null)
             ]);
+
+            // 用户已点取消，忽略迟到结果
+            if (scanCancelled) return;
 
             updateOCRText('综合分析结果...');
 
@@ -674,6 +678,7 @@ function captureBarcodeImage(target) {
 
 // 待用户确认的识别结果（用于"提示识别到的文字/数字"）
 let pendingScan = null;
+let scanCancelled = false;   // 用户取消识别标记，忽略迟到结果
 
 // 识别完成后展示：来源 + 识别到的字符，供用户核对
 function showScanResult(sn, method, file) {
@@ -699,6 +704,13 @@ async function confirmScanResult() {
         } catch (e) { console.error('保存识别图片失败:', e); }
     }
     showToast((p.method || '识别成功') + '：' + p.sn);
+}
+
+// 用户点"取消/手动输入"→ 关闭遮罩，返回手动录入界面
+function cancelScan() {
+    scanCancelled = true;
+    hideOCRMask();
+    showToast('已取消识别，可手动输入SN码');
 }
 
 // 用户点"重拍"→ 关闭遮罩重新拍照识别
