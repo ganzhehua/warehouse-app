@@ -530,8 +530,8 @@ function startScanner(target) {
 
     const config = {
         fps: 15,
-        qrbox: { width: 280, height: 120 },
-        aspectRatio: 2.5,
+        qrbox: { width: 260, height: 260 },
+        aspectRatio: 1.0,
         showTorchButtonIfSupported: true,
         videoConstraints: {
             facingMode: 'environment',
@@ -548,7 +548,10 @@ function startScanner(target) {
             Html5QrcodeSupportedFormats.UPC_A,
             Html5QrcodeSupportedFormats.UPC_E,
             Html5QrcodeSupportedFormats.CODABAR,
-            Html5QrcodeSupportedFormats.QR_CODE
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.DATA_MATRIX,
+            Html5QrcodeSupportedFormats.AZTEC,
+            Html5QrcodeSupportedFormats.MAXICODE
         ]
     };
 
@@ -560,7 +563,7 @@ function startScanner(target) {
             scannerActive = false;
             stopScanner();
 
-            const sn = decodedText.trim();
+            const sn = cleanScanText(decodedText);
             if (target === 'sn') {
                 document.getElementById('sn').value = sn;
                 showToast('扫码成功：' + sn);
@@ -737,7 +740,10 @@ async function tryZXingBarcode(dataUrl) {
                 ZXing.BarcodeFormat.CODABAR,
                 ZXing.BarcodeFormat.EAN_13,
                 ZXing.BarcodeFormat.UPC_A,
-                ZXing.BarcodeFormat.QR_CODE
+                ZXing.BarcodeFormat.QR_CODE,
+                ZXing.BarcodeFormat.DATA_MATRIX,
+                ZXing.BarcodeFormat.AZTEC,
+                ZXing.BarcodeFormat.PDF_417
             ]);
             hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
             reader.hints = hints;
@@ -1056,6 +1062,22 @@ function extractSNFromText(text) {
     sn = sn.replace(/^SN/i, '').replace(/^S\/N/i, '');
 
     return sn;
+}
+
+// 清理二维码/条码直接解码出的文本，提取纯净的SN（数字为主）
+function cleanScanText(text) {
+    if (!text) return '';
+    const t = String(text).trim();
+    // 优先走SN提取规则（能去 S/N: 前缀、URL、空格的干扰）
+    const extracted = extractSNFromText(t);
+    if (extracted) return extracted;
+    // 兜底：去掉常见干扰再清成字母数字
+    const cleaned = t
+        .replace(/^(https?:\/\/[^\s]+)/i, '')   // 去掉URL
+        .replace(/\s+/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+    return cleaned || t;
 }
 
 function fileToDataURL(file) {
