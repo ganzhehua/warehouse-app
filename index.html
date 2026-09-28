@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <link rel="shortcut icon" href="icons/icon-192.png">
     <title>仓库设备管理系统</title>
-    <link rel="stylesheet" href="style.css?v=3.1">
+    <link rel="stylesheet" href="style.css?v=3.2">
     <!-- Html5Qrcode 条形码扫描库 -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <!-- ZXing 条码识别引擎（双重保障，对CODE128更准） -->
@@ -36,7 +36,7 @@
     <!-- 顶部导航栏 -->
     <header class="app-header">
         <h1>仓库设备管理系统</h1>
-        <span class="version-tag" onclick="checkUpdate()">v3.1</span>
+        <span class="version-tag" onclick="checkUpdate()">v3.2</span>
     </header>
 
     <!-- 底部导航 -->
@@ -297,9 +297,17 @@
 
     <!-- 扫码处理中遮罩 -->
     <div id="ocr-mask" class="ocr-mask">
-        <div class="ocr-loading">
+        <div class="ocr-loading" id="ocr-loading">
             <div class="spinner"></div>
             <p id="ocr-text">正在识别条形码...</p>
+        </div>
+        <div class="ocr-result" id="ocr-result" style="display:none;">
+            <p id="ocr-result-sn" style="font-size:16px;font-weight:bold;word-break:break-all;margin-bottom:8px;"></p>
+            <p id="ocr-result-method" style="font-size:12px;color:#666;margin-bottom:14px;"></p>
+            <div style="display:flex;gap:10px;">
+                <button onclick="confirmScanResult()" style="flex:1;background:#1677ff;color:#fff;border:none;border-radius:6px;padding:9px 0;font-size:14px;cursor:pointer;">✅ 采用</button>
+                <button onclick="retakeScan()" style="flex:1;background:#eee;color:#333;border:none;border-radius:6px;padding:9px 0;font-size:14px;cursor:pointer;">📷 重拍</button>
+            </div>
         </div>
     </div>
 
@@ -329,6 +337,6 @@
     <!-- Toast提示 -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=3.1"></script>
+    <script src="app.js?v=3.2"></script>
 </body>
 </html>

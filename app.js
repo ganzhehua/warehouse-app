@@ -496,6 +496,10 @@ function updateOCRText(text) {
 
 function hideOCRMask() {
     document.getElementById('ocr-mask').classList.remove('show');
+    // 恢复加载状态，为下次识别做准备
+    document.getElementById('ocr-loading').style.display = '';
+    document.getElementById('ocr-result').style.display = 'none';
+    pendingScan = null;
 }
 
 // 启动实时摄像头扫码（Html5Qrcode，手机端识别率更高）
@@ -649,17 +653,13 @@ function captureBarcodeImage(target) {
                     return;
                 }
 
-                if (target === 'sn') {
-                    document.getElementById('sn').value = finalSN;
-                    const dataUrl = await fileToDataURL(file);
-                    const compressed = await compressImage(dataUrl, 600, 0.6);
-                    photoData.sn = compressed;
-                    showPhotoPreview('sn', compressed);
-                    showToast(method + '：' + finalSN);
-                } else if (target === 'search') {
+                if (target === 'search') {
                     document.getElementById('search-input').value = finalSN;
                     doSearch();
+                    return;
                 }
+                // sn 场景：先展示识别到的文字/数字，让用户核对后再采用
+                showScanResult(finalSN, method, file);
             } else {
                 showToast('未能识别，请重试或手动输入');
             }
@@ -670,6 +670,43 @@ function captureBarcodeImage(target) {
         }
     };
     input.click();
+}
+
+// 待用户确认的识别结果（用于"提示识别到的文字/数字"）
+let pendingScan = null;
+
+// 识别完成后展示：来源 + 识别到的字符，供用户核对
+function showScanResult(sn, method, file) {
+    document.getElementById('ocr-loading').style.display = 'none';
+    document.getElementById('ocr-result').style.display = 'block';
+    document.getElementById('ocr-result-sn').textContent = sn;
+    document.getElementById('ocr-result-method').textContent = '识别来源：' + (method || '识别成功');
+    pendingScan = { sn: sn, method: method, file: file };
+}
+
+// 用户点"采用"→ 确认无误则填入
+async function confirmScanResult() {
+    if (!pendingScan) return;
+    const p = pendingScan;
+    pendingScan = null;
+    hideOCRMask();
+    document.getElementById('sn').value = p.sn;
+    if (p.file) {
+        try {
+            const dataUrl = await fileToDataURL(p.file);
+            const compressed = await compressImage(dataUrl, 600, 0.6);
+            if (compressed) { photoData.sn = compressed; showPhotoPreview('sn', compressed); }
+        } catch (e) { console.error('保存识别图片失败:', e); }
+    }
+    showToast((p.method || '识别成功') + '：' + p.sn);
+}
+
+// 用户点"重拍"→ 关闭遮罩重新拍照识别
+function retakeScan() {
+    if (!pendingScan) return;
+    pendingScan = null;
+    hideOCRMask();
+    captureBarcodeImage('sn');
 }
 
 // ===== 条码识别：ZXing + Html5Qrcode 双引擎并行 =====
@@ -838,7 +875,10 @@ async function tryOCR_SN(file) {
                 }
             });
             await ocrWorker.setParameters({
-                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789S/N:- '
+                // 白名单：只识别字母、数字和S/N分隔符，避免认出无关符号
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789S/N:- ',
+                // 单行文本模式，SN码通常是独立一行，识别更准
+                tessedit_pageseg_mode: '6'
             });
         }
 
@@ -856,15 +896,14 @@ async function tryOCR_SN(file) {
         const results = [];
         for (let i = 0; i < variants.length; i++) {
             if (!variants[i]) continue;
-            updateOCRText(`OCR识别中 变体${i+1}/${variants.length}...`);
+            updateOCRText(`OCR识别中 变体${i+1}/${variants.length}，等待投票选出最优...`);
             try {
                 const { data } = await ocrWorker.recognize(variants[i]);
                 if (data && data.text) {
                     const sn = extractSNFromText(data.text);
                     if (sn) {
-                        // 用置信度打分
                         const conf = data.confidence || 50;
-                        results.push({ sn, confidence: conf, variant: i });
+                        results.push({ sn, confidence: conf, text: data.text });
                     }
                 }
             } catch(e) { /* 跳过 */ }
@@ -872,9 +911,20 @@ async function tryOCR_SN(file) {
 
         if (results.length === 0) return null;
 
-        // 按置信度排序，取最高的
-        results.sort((a, b) => b.confidence - a.confidence);
-        return results[0].sn;
+        // 多变体投票：重复出现的识别结果可信度更高（减少单张随机误识别）
+        const tally = new Map(); // sn -> {count, confSum}
+        for (const r of results) {
+            if (!tally.has(r.sn)) tally.set(r.sn, { count: 0, confSum: 0 });
+            const t = tally.get(r.sn);
+            t.count++; t.confSum += r.confidence;
+        }
+        let best = null, bestScore = -1;
+        for (const [sn, t] of tally) {
+            // 得分 = 出现次数权重 * 平均置信度（次数优先，置信度次之）
+            const score = t.count * 100 + (t.confSum / t.count);
+            if (score > bestScore) { bestScore = score; best = sn; }
+        }
+        return best;
     } catch (err) {
         console.error('OCR错误:', err);
         return null;
