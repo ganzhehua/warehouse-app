@@ -42,18 +42,41 @@ function idbPut(key, val) {
 // 去掉图片的精简版（用于 localStorage 兜底，节省空间）
 function stripPic(d) { return { ...d, snPhoto: '', frontPhoto: '' }; }
 
+// 数据规范化：补齐缺失字段默认值，防止渲染/统计时报错
+function normalizeDevice(d) {
+    if (!d || typeof d !== 'object') return null;
+    return {
+        id: d.id || genId(),
+        manufacturer: d.manufacturer != null ? d.manufacturer : '',
+        type: d.type != null ? d.type : '',
+        name: d.name != null ? d.name : '',
+        model: d.model != null ? d.model : '',
+        sn: d.sn != null ? d.sn : '',
+        snPhoto: d.snPhoto || '',
+        frontPhoto: d.frontPhoto || '',
+        quantity: isNaN(parseInt(d.quantity)) ? 0 : parseInt(d.quantity),
+        unit: d.unit != null ? d.unit : '件',
+        status: d.status != null ? d.status : '在库',
+        location: d.location != null ? d.location : '南街局值守班',
+        remark: d.remark != null ? d.remark : '',
+        outbound: d.outbound != null ? d.outbound : '',
+        createdAt: d.createdAt || Date.now(),
+        updatedAt: d.updatedAt || Date.now()
+    };
+}
+
 // 启动时初始化：优先 IndexedDB，旧数据从 localStorage 迁移过来
 async function initStorage() {
     try {
         const idbData = await idbGet(STORAGE_KEY);
-        deviceCache = Array.isArray(idbData) ? idbData : null;
+        deviceCache = Array.isArray(idbData) ? idbData.map(normalizeDevice).filter(Boolean) : null;
     } catch (e) { deviceCache = null; }
 
     if (!deviceCache) {
         const legacy = getLegacyDevices();
         if (legacy && legacy.length) {
-            deviceCache = legacy;
-            await idbPut(STORAGE_KEY, legacy).catch(() => {});
+            deviceCache = legacy.map(normalizeDevice).filter(Boolean);
+            await idbPut(STORAGE_KEY, deviceCache).catch(() => {});
         }
     }
     // localStorage 只保留去图片的精简副本，释放空间
@@ -186,13 +209,22 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
         if (!document.getElementById('edit-id').value) {
             saveFieldMemory(device);
         }
+
+        // 复位按钮，避免残留"保存中..."影响下次录入
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
     } catch (err) {
         console.error('保存后续处理出错:', err);
     }
 
-    // 任何情况下都跳回首页
+    // 任何情况下都跳回首页（渲染异常也不许影响跳转/按钮复位）
     try { resetForm(); } catch (err) { console.error('resetForm出错:', err); }
-    switchPage('home');
+    try {
+        switchPage('home');
+    } catch (err) {
+        console.error('跳转首页出错:', err);
+        // 兜底：手动切回录入页并复位按钮，保证还能继续用
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
+    }
 });
 
 function resetForm() {
