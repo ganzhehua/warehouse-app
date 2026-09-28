@@ -878,11 +878,12 @@ function enhanceBarcodeImage(dataUrl) {
 async function tryOCR_SN(file) {
     try {
         if (!ocrWorker) {
-            updateOCRText('加载OCR引擎(中英)...');
-            ocrWorker = await Tesseract.createWorker(['eng', 'chi_sim'], 1, {
+            updateOCRText('加载OCR引擎(英文)...');
+            // 只加载英文模型：SN码由字母+数字组成，不含中文，加载更快、识别更稳更快
+            ocrWorker = await Tesseract.createWorker(['eng'], 1, {
                 logger: m => {
                     if (m.status && m.progress !== undefined) {
-                        updateOCRText(`OCR识别中 ${Math.round(m.progress*100)}%`);
+                        updateOCRText(`OCR引擎加载/识别中 ${Math.round(m.progress*100)}%`);
                     }
                 }
             });
@@ -896,12 +897,13 @@ async function tryOCR_SN(file) {
 
         const dataUrl = await fileToDataURL(file);
 
-        // 生成多个预处理变体并行跑OCR，取最优结果
+        // 生成多个预处理变体并行跑OCR，取最优结果（含反相，应对深底浅字标签）
         const variants = await Promise.all([
             Promise.resolve(dataUrl),                        // 原图
             enhanceForOCR(dataUrl, 1.5, 0),                   // 放大1.5x
             enhanceForOCR(dataUrl, 2.0, 30),                  // 放大2x + 对比度+30
             enhanceForOCR(dataUrl, 2.0, 60),                  // 放大2x + 对比度+60
+            invertImage(dataUrl),                             // 反相（深底浅字）
         ]);
 
         // 依次跑OCR（Tesseract worker不支持并发，需串行）
@@ -941,6 +943,32 @@ async function tryOCR_SN(file) {
         console.error('OCR错误:', err);
         return null;
     }
+}
+
+// 图像反相（深底浅字的标签/铭牌用）
+function invertImage(dataUrl) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const src = ctx.getImageData(0, 0, img.width, img.height).data;
+            const out = ctx.createImageData(img.width, img.height);
+            for (let i = 0; i < src.length; i += 4) {
+                out.data[i]   = 255 - src[i];
+                out.data[i+1] = 255 - src[i+1];
+                out.data[i+2] = 255 - src[i+2];
+                out.data[i+3] = src[i+3];
+            }
+            ctx.putImageData(out, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
 }
 
 // OCR专用图像预处理：放大 + 灰度 + 对比度增强 + 锐化
