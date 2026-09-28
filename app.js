@@ -6,27 +6,81 @@ const MEMORY_KEY = 'warehouse_memory'; // 上次录入值记忆key
 let photoData = { sn: '', front: '' };
 let draftTimer = null;                 // 草稿防抖定时器
 
-// ===== 工具函数 =====
-function getDevices() {
+// ===== 存储层：IndexedDB 为主（容量大，可存图片），localStorage 仅作精简兜底 =====
+let deviceCache = null;   // 内存缓存，供同步读取
+let idbDB = null;
+
+function idbOpen() {
+    return new Promise((resolve, reject) => {
+        if (idbDB) return resolve(idbDB);
+        const req = indexedDB.open('warehouse_db', 1);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('devices')) db.createObjectStore('devices');
+        };
+        req.onsuccess = () => { idbDB = req.result; resolve(idbDB); };
+        req.onerror = () => reject(req.error);
+    });
+}
+function idbGet(key) {
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction('devices', 'readonly');
+        const r = tx.objectStore('devices').get(key);
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+    }));
+}
+function idbPut(key, val) {
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction('devices', 'readwrite');
+        const r = tx.objectStore('devices').put(val, key);
+        r.onsuccess = () => resolve();
+        r.onerror = () => reject(r.error);
+    }));
+}
+
+// 去掉图片的精简版（用于 localStorage 兜底，节省空间）
+function stripPic(d) { return { ...d, snPhoto: '', frontPhoto: '' }; }
+
+// 启动时初始化：优先 IndexedDB，旧数据从 localStorage 迁移过来
+async function initStorage() {
+    try {
+        const idbData = await idbGet(STORAGE_KEY);
+        deviceCache = Array.isArray(idbData) ? idbData : null;
+    } catch (e) { deviceCache = null; }
+
+    if (!deviceCache) {
+        const legacy = getLegacyDevices();
+        if (legacy && legacy.length) {
+            deviceCache = legacy;
+            await idbPut(STORAGE_KEY, legacy).catch(() => {});
+        }
+    }
+    // localStorage 只保留去图片的精简副本，释放空间
+    try {
+        if (deviceCache) localStorage.setItem(STORAGE_KEY, JSON.stringify(deviceCache.map(stripPic)));
+    } catch (e) {}
+}
+
+function getLegacyDevices() {
     try {
         const data = localStorage.getItem(STORAGE_KEY);
-        return data ? JSON.parse(data) : [];
-    } catch (e) {
-        return [];
-    }
+        return data ? JSON.parse(data) : null;
+    } catch (e) { return null; }
+}
+
+function getDevices() {
+    if (!Array.isArray(deviceCache)) deviceCache = [];
+    return deviceCache;
 }
 
 function saveDevices(devices) {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(devices));
-        return true;
-    } catch (e) {
-        console.error('存储失败:', e);
-        if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)) {
-            throw new Error('QUOTA_FULL');
-        }
-        throw e;
-    }
+    deviceCache = devices;
+    // 主存储：IndexedDB（含图片，容量大）
+    idbPut(STORAGE_KEY, devices).catch(err => console.error('IndexedDB写入失败:', err));
+    // 兜底：localStorage 写去图片精简版
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(devices.map(stripPic))); } catch (e) {}
+    return true;
 }
 
 function genId() {
@@ -116,24 +170,8 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
         saveDevices(devices);
     } catch (err) {
         console.error('保存出错:', err);
-        // 存储空间已满 → 尝试去掉图片降级保存
-        if (err && err.message === 'QUOTA_FULL') {
-            const devicesNoPic = getDevices();
-            if (!document.getElementById('edit-id').value) {
-                devicesNoPic.unshift({ ...device, snPhoto: '', frontPhoto: '' });
-            }
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(devicesNoPic));
-                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
-                showToast('存储已满！已保存(不含图片)，请清理后重新上传图片', 4000);
-                switchPage('home');
-                return;
-            } catch (e2) {
-                // 去掉图片仍失败 → 无法保存
-            }
-        }
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
-        showToast('保存失败：存储空间已满，请清理或导出备份后重试', 4000);
+        showToast('保存失败，请重试', 3000);
         return;
     }
 
@@ -1342,7 +1380,9 @@ function checkUpdate() {
 }
 
 // ===== 初始化 =====
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+    // 先加载 IndexedDB 存储（含图片），再渲染
+    try { await initStorage(); } catch (e) { console.error('存储初始化失败:', e); }
     updateHome();
 
     // 绑定录入表单的所有输入 → 自动保存草稿
