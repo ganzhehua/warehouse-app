@@ -1,6 +1,6 @@
 // ===== Service Worker - 离线缓存 =====
 
-const CACHE_NAME = 'warehouse-app-v5';
+const CACHE_NAME = 'warehouse-app-v6';
 const OFFLINE_URL = 'index.html';
 
 // 需要缓存的核心文件
@@ -43,14 +43,15 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// 请求拦截 - 缓存优先策略
+// 请求拦截 - 后台更新策略（网络优先，同时更新缓存）
+// 关键：核心脚本用"有缓存先用 + 后台拉最新"，避免用户被困在旧版本
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  // 只缓存GET请求
+  // 只处理GET请求
   if (request.method !== 'GET') return;
 
-  // 对于导航请求，使用网络优先，离线时回退到缓存
+  // 导航请求：网络优先，离线回退缓存
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -68,17 +69,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 对于其他资源，使用缓存优先，回退到网络
+  // 其他资源：后台更新（先给缓存，后台拉新版本刷新缓存）
   event.respondWith(
     caches.match(request).then((cached) => {
-      return cached || fetch(request).then((response) => {
-        // 缓存成功的响应
-        if (response && response.status === 200) {
+      const networkFetch = fetch(request).then((response) => {
+        if (response && response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(request, clone));
         }
         return response;
       }).catch(() => cached);
+      // 有缓存就用缓存（快），同时后台用网络更新
+      return cached || networkFetch;
     })
   );
 });
