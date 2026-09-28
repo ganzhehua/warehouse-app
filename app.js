@@ -61,56 +61,74 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 document.getElementById('entry-form').addEventListener('submit', function (e) {
     e.preventDefault();
 
-    const device = {
-        id: document.getElementById('edit-id').value || genId(),
-        manufacturer: document.getElementById('manufacturer').value.trim(),
-        type: document.getElementById('type').value,
-        name: document.getElementById('name').value.trim(),
-        model: document.getElementById('model').value.trim(),
-        sn: document.getElementById('sn').value.trim(),
-        snPhoto: photoData.sn,
-        frontPhoto: photoData.front,
-        quantity: parseInt(document.getElementById('quantity').value) || 0,
-        unit: document.getElementById('unit').value,
-        status: document.getElementById('status').value,
-        location: document.getElementById('location').value.trim(),
-        remark: document.getElementById('remark').value.trim(),
-        outbound: document.getElementById('outbound').value.trim(),
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    };
+    // 保存按钮反馈：防止误以为没反应/重复提交
+    const saveBtn = document.getElementById('save-btn');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '保存中...';
+    }
 
-    const devices = getDevices();
-    const editId = document.getElementById('edit-id').value;
+    let device;
+    try {
+        device = {
+            id: document.getElementById('edit-id').value || genId(),
+            manufacturer: document.getElementById('manufacturer').value.trim(),
+            type: document.getElementById('type').value,
+            name: document.getElementById('name').value.trim(),
+            model: document.getElementById('model').value.trim(),
+            sn: document.getElementById('sn').value.trim(),
+            snPhoto: photoData.sn,
+            frontPhoto: photoData.front,
+            quantity: parseInt(document.getElementById('quantity').value) || 0,
+            unit: document.getElementById('unit').value,
+            status: document.getElementById('status').value,
+            location: document.getElementById('location').value.trim(),
+            remark: document.getElementById('remark').value.trim(),
+            outbound: document.getElementById('outbound').value.trim(),
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
 
-    if (editId) {
-        const idx = devices.findIndex(d => d.id === editId);
-        if (idx !== -1) {
-            device.createdAt = devices[idx].createdAt;
-            devices[idx] = device;
-            showToast('修改成功！');
+        const devices = getDevices();
+        const editId = document.getElementById('edit-id').value;
+
+        if (editId) {
+            const idx = devices.findIndex(d => d.id === editId);
+            if (idx !== -1) {
+                device.createdAt = devices[idx].createdAt;
+                devices[idx] = device;
+                showToast('修改成功！');
+            }
+        } else {
+            devices.unshift(device);
+            showToast('录入成功！');
         }
-    } else {
-        devices.unshift(device);
-        showToast('录入成功！');
+
+        saveDevices(devices);
+    } catch (err) {
+        console.error('保存出错:', err);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
+        showToast('保存失败，请重试', 3000);
+        return;
     }
 
-    saveDevices(devices);
+    // 保存成功后处理（记忆/草稿等，异常不影响跳转）
+    try {
+        // 取消草稿防抖定时器并清除草稿
+        if (draftTimer) clearTimeout(draftTimer);
+        localStorage.removeItem(DRAFT_KEY);
+        removeDraftBanner();
 
-    // 保存后取消草稿防抖定时器并清除草稿，避免清空后的表单再次写回
-    if (draftTimer) clearTimeout(draftTimer);
-    localStorage.removeItem(DRAFT_KEY);
-    removeDraftBanner();
-
-    // 录入成功 → 记住高频字段，下次自动填入
-    if (!editId) {
-        saveFieldMemory(device);
-        showToast('录入成功！已记住厂家/类型/状态');
-    } else {
-        showToast('修改成功！');
+        // 录入成功 → 记住高频字段，下次自动填入
+        if (!document.getElementById('edit-id').value) {
+            saveFieldMemory(device);
+        }
+    } catch (err) {
+        console.error('保存后续处理出错:', err);
     }
 
-    resetForm();
+    // 任何情况下都跳回首页
+    try { resetForm(); } catch (err) { console.error('resetForm出错:', err); }
     switchPage('home');
 });
 
