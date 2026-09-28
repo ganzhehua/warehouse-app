@@ -91,12 +91,6 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
             showToast('修改成功！');
         }
     } else {
-        // 检查SN是否重复
-        if (devices.some(d => d.sn === device.sn)) {
-            if (!confirm(`SN码"${device.sn}"已存在，是否继续保存？`)) {
-                return;
-            }
-        }
         devices.unshift(device);
         showToast('录入成功！');
     }
