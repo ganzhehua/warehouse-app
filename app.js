@@ -903,7 +903,7 @@ async function tryOCR_SN(file) {
 
         const dataUrl = await fileToDataURL(file);
 
-        // 生成多个预处理变体并行跑OCR，取最优结果（含反相 + 数字高清增强，应对深底浅字/小字标签）
+        // 生成多个预处理变体并行跑OCR，取最优结果（含反相 + 数字高清 + 直方图均衡化，应对反光/低对比铭牌文字）
         const variants = await Promise.all([
             Promise.resolve(dataUrl),                        // 原图
             enhanceForOCR(dataUrl, 1.5, 0),                   // 放大1.5x
@@ -911,6 +911,7 @@ async function tryOCR_SN(file) {
             enhanceForOCR(dataUrl, 2.0, 60),                  // 放大2x + 对比度+60
             enhanceForOCR(dataUrl, 3.0, 70),                  // 放大3x + 高对比度(数字串号更清晰)
             invertImage(dataUrl),                             // 反相（深底浅字）
+            autoEqualize(dataUrl),                            // 直方图均衡化（低对比/反光灰字最有效）
         ]);
 
         // 依次跑OCR（Tesseract worker不支持并发，需串行）
@@ -972,6 +973,59 @@ function invertImage(dataUrl) {
             }
             ctx.putImageData(out, 0, 0);
             resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
+}
+
+// 直方图均衡化 + 亮度拉伸：增强低对比、反光、灰蒙蒙铭牌上的SN文字
+function autoEqualize(dataUrl) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const scale = 2;
+                const w = img.width * scale, h = img.height * scale;
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(img, 0, 0, w, h);
+                const src = ctx.getImageData(0, 0, w, h).data;
+
+                // 灰度化
+                const gray = new Uint8ClampedArray(w * h);
+                for (let i = 0, j = 0; i < src.length; i += 4, j++) {
+                    gray[j] = src[i] * 0.3 + src[i+1] * 0.59 + src[i+2] * 0.11;
+                }
+
+                // 直方图均衡化（累计分布函数映射）
+                const hist = new Array(256).fill(0);
+                for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+                const total = gray.length;
+                const cdf = new Array(256).fill(0);
+                let acc = 0;
+                for (let i = 0; i < 256; i++) {
+                    acc += hist[i];
+                    cdf[i] = acc / total;
+                }
+                const cdfMin = cdf.find(v => v > 0) || 0;
+                const map = new Array(256);
+                for (let i = 0; i < 256; i++) {
+                    map[i] = Math.round(((cdf[i] - cdfMin) / (1 - cdfMin)) * 255);
+                }
+
+                const out = ctx.createImageData(w, h);
+                for (let i = 0, j = 0; i < src.length; i += 4, j++) {
+                    const v = Math.max(0, Math.min(255, map[gray[j]]));
+                    out.data[i] = v; out.data[i+1] = v; out.data[i+2] = v; out.data[i+3] = 255;
+                }
+                ctx.putImageData(out, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+            } catch (e) {
+                resolve(null);
+            }
         };
         img.onerror = () => resolve(null);
         img.src = dataUrl;
