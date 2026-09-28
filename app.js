@@ -17,7 +17,16 @@ function getDevices() {
 }
 
 function saveDevices(devices) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(devices));
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(devices));
+        return true;
+    } catch (e) {
+        console.error('存储失败:', e);
+        if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)) {
+            throw new Error('QUOTA_FULL');
+        }
+        throw e;
+    }
 }
 
 function genId() {
@@ -107,8 +116,24 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
         saveDevices(devices);
     } catch (err) {
         console.error('保存出错:', err);
+        // 存储空间已满 → 尝试去掉图片降级保存
+        if (err && err.message === 'QUOTA_FULL') {
+            const devicesNoPic = getDevices();
+            if (!document.getElementById('edit-id').value) {
+                devicesNoPic.unshift({ ...device, snPhoto: '', frontPhoto: '' });
+            }
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(devicesNoPic));
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
+                showToast('存储已满！已保存(不含图片)，请清理后重新上传图片', 4000);
+                switchPage('home');
+                return;
+            } catch (e2) {
+                // 去掉图片仍失败 → 无法保存
+            }
+        }
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存录入'; }
-        showToast('保存失败，请重试', 3000);
+        showToast('保存失败：存储空间已满，请清理或导出备份后重试', 4000);
         return;
     }
 
@@ -333,7 +358,7 @@ function handlePhotoUpload(input, type) {
     reader.onload = function (e) {
         const imgData = e.target.result;
         // 压缩图片
-        compressImage(imgData, 800, 0.7).then(compressed => {
+        compressImage(imgData, 600, 0.6).then(compressed => {
             photoData[type] = compressed;
             showPhotoPreview(type, compressed);
             showToast('图片已添加');
@@ -557,7 +582,7 @@ function captureBarcodeImage(target) {
                 if (target === 'sn') {
                     document.getElementById('sn').value = finalSN;
                     const dataUrl = await fileToDataURL(file);
-                    const compressed = await compressImage(dataUrl, 800, 0.7);
+                    const compressed = await compressImage(dataUrl, 600, 0.6);
                     photoData.sn = compressed;
                     showPhotoPreview('sn', compressed);
                     showToast(method + '：' + finalSN);
