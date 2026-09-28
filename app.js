@@ -97,6 +97,11 @@ document.getElementById('entry-form').addEventListener('submit', function (e) {
 
     saveDevices(devices);
 
+    // 保存后取消草稿防抖定时器并清除草稿，避免清空后的表单再次写回
+    if (draftTimer) clearTimeout(draftTimer);
+    localStorage.removeItem(DRAFT_KEY);
+    removeDraftBanner();
+
     // 录入成功 → 记住高频字段，下次自动填入
     if (!editId) {
         saveFieldMemory(device);

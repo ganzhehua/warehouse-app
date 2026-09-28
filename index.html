@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <link rel="shortcut icon" href="icons/icon-192.png">
     <title>仓库设备管理系统</title>
-    <link rel="stylesheet" href="style.css?v=2.6">
+    <link rel="stylesheet" href="style.css?v=2.7">
     <!-- Html5Qrcode 条形码扫描库 -->
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <!-- ZXing 条码识别引擎（双重保障，对CODE128更准） -->
@@ -36,7 +36,7 @@
     <!-- 顶部导航栏 -->
     <header class="app-header">
         <h1>仓库设备管理系统</h1>
-        <span class="version-tag" onclick="checkUpdate()">v2.6</span>
+        <span class="version-tag" onclick="checkUpdate()">v2.7</span>
     </header>
 
     <!-- 底部导航 -->
@@ -126,18 +126,18 @@
                 <datalist id="datalist-status"></datalist>
 
                 <div class="form-group">
-                    <label>厂家 <span class="required">*</span></label>
-                    <input type="text" id="manufacturer" list="datalist-manufacturer" placeholder="请输入厂家名称" required>
+                    <label>厂家</label>
+                    <input type="text" id="manufacturer" list="datalist-manufacturer" placeholder="请输入厂家名称">
                 </div>
 
                 <div class="form-group">
-                    <label>设备/备件类型 <span class="required">*</span></label>
-                    <input type="text" id="type" list="datalist-type" placeholder="请输入类型，如：设备、备件、工具等" required>
+                    <label>设备/备件类型</label>
+                    <input type="text" id="type" list="datalist-type" placeholder="请输入类型，如：设备、备件、工具等">
                 </div>
 
                 <div class="form-group">
-                    <label>设备/备件名称 <span class="required">*</span></label>
-                    <input type="text" id="name" list="datalist-name" placeholder="请输入名称" required>
+                    <label>设备/备件名称</label>
+                    <input type="text" id="name" list="datalist-name" placeholder="请输入名称">
                 </div>
 
                 <div class="form-group">
@@ -178,9 +178,9 @@
                 </div>
 
                 <div class="form-group">
-                    <label>数量 <span class="required">*</span></label>
+                    <label>数量</label>
                     <div class="qty-group">
-                        <input type="number" id="quantity" placeholder="数量" min="0" step="1" required style="flex:1;">
+                        <input type="number" id="quantity" placeholder="数量" min="0" step="1" style="flex:1;">
                         <select id="unit">
                             <option value="件">件</option>
                             <option value="套">套</option>
@@ -192,12 +192,12 @@
                 </div>
 
                 <div class="form-group">
-                    <label>设备/备件使用状态 <span class="required">*</span></label>
-                    <input type="text" id="status" placeholder="请输入状态，如：在库、出库、维修中等" required>
+                    <label>设备/备件使用状态</label>
+                    <input type="text" id="status" placeholder="请输入状态，如：在库、出库、维修中等">
                 </div>
 
                 <div class="form-group">
-                    <label>存放地点 <span class="required">*</span></label>
+                    <label>存放地点</label>
                     <input type="text" id="location" value="南街局值守班" readonly style="background:#f0f0f0;color:#666;">
                 </div>
 
@@ -329,6 +329,6 @@
     <!-- Toast提示 -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=2.6"></script>
+    <script src="app.js?v=2.7"></script>
 </body>
 </html>
