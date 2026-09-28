@@ -903,12 +903,13 @@ async function tryOCR_SN(file) {
 
         const dataUrl = await fileToDataURL(file);
 
-        // 生成多个预处理变体并行跑OCR，取最优结果（含反相，应对深底浅字标签）
+        // 生成多个预处理变体并行跑OCR，取最优结果（含反相 + 数字高清增强，应对深底浅字/小字标签）
         const variants = await Promise.all([
             Promise.resolve(dataUrl),                        // 原图
             enhanceForOCR(dataUrl, 1.5, 0),                   // 放大1.5x
             enhanceForOCR(dataUrl, 2.0, 30),                  // 放大2x + 对比度+30
             enhanceForOCR(dataUrl, 2.0, 60),                  // 放大2x + 对比度+60
+            enhanceForOCR(dataUrl, 3.0, 70),                  // 放大3x + 高对比度(数字串号更清晰)
             invertImage(dataUrl),                             // 反相（深底浅字）
         ]);
 
@@ -1061,7 +1062,20 @@ function extractSNFromText(text) {
     // 去除常见误识别前缀（如 "S/N" 被识别进结果里）
     sn = sn.replace(/^SN/i, '').replace(/^S\/N/i, '');
 
-    return sn;
+    return correctOCRDigits(sn);
+}
+
+// 数字优先纠正：仅当SN串里数字占多数时，把OCR常混淆的字母纠正回数字
+// （O/0、D/0、I/1、L/1、S/5、B/8、G/6、Z/2），降低对数字串号的误读
+function correctOCRDigits(sn) {
+    if (!sn) return sn;
+    const digits = (sn.match(/[0-9]/g) || []).length;
+    const letters = (sn.match(/[A-Z]/g) || []).length;
+    // 数字若不是主体则不强行纠正，避免误伤真实字母
+    if (letters >= digits) return sn;
+
+    const map = { 'O': '0', 'D': '0', 'I': '1', 'L': '1', 'S': '5', 'B': '8', 'G': '6', 'Z': '2', 'Q': '0' };
+    return sn.split('').map(c => map[c] ? map[c] : c).join('');
 }
 
 // 清理二维码/条码直接解码出的文本，提取纯净的SN（数字为主）

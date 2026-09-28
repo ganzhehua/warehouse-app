@@ -1,6 +1,6 @@
 // ===== Service Worker - 离线缓存 =====
 
-const CACHE_NAME = 'warehouse-app-v9';
+const CACHE_NAME = 'warehouse-app-v10';
 const OFFLINE_URL = 'index.html';
 
 // 需要缓存的核心文件
